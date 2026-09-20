@@ -1,3 +1,11 @@
+// Replace this small configuration section when wiring a real Supabase Auth client.
+// Keep configured false until the provider credentials and callback flow are deployed.
+const AUTH_CONFIG = {
+  provider: "supabase",
+  configured: false,
+  redirectUrl: window.location.origin,
+};
+
 const toast = document.getElementById("toast");
 const showToast = (message) => {
   toast.textContent = message;
@@ -12,9 +20,22 @@ document.querySelectorAll("[data-scroll]").forEach((button) => {
 
 const privacyDialog = document.getElementById("privacyDialog");
 const calendarDialog = document.getElementById("calendarDialog");
+const accountDialog = document.getElementById("accountDialog");
 document.getElementById("privacyButton").addEventListener("click", () => privacyDialog.showModal());
 document.getElementById("calendarButton").addEventListener("click", () => calendarDialog.showModal());
+document.querySelectorAll("#accountButton, #topAccountButton").forEach((button) => button.addEventListener("click", () => accountDialog.showModal()));
 document.querySelectorAll(".close-dialog").forEach((button) => button.addEventListener("click", () => button.closest("dialog").close()));
+
+const googleSignInButton = document.getElementById("googleSignInButton");
+googleSignInButton.addEventListener("click", () => {
+  if (!AUTH_CONFIG.configured) {
+    document.getElementById("authNote").textContent = "Google sign-in is not connected yet. Add the Supabase URL and anon key, then wire the OAuth callback described in DEPLOY.md.";
+    showToast("Google sign-in needs provider credentials first.");
+    return;
+  }
+
+  showToast("Google sign-in is ready for the Supabase client.");
+});
 
 document.querySelectorAll(".privacy-option").forEach((option) => {
   option.addEventListener("click", () => {

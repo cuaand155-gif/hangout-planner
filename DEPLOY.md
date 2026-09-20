@@ -32,6 +32,32 @@ Hangout Planner is a dependency-free static site. There is no build step: deploy
 
 Because this is a single-page static prototype with hash navigation, no rewrite configuration is required for the current routes.
 
+## Google sign-in setup
+
+The account entry point and **Continue with Google** action are present, but Google OAuth is intentionally not enabled in this repository. `app.js` contains the small `AUTH_CONFIG` section and currently keeps `configured: false`; clicking the action explains that credentials are missing instead of pretending that a user signed in.
+
+For a static site or Vercel deployment, [Supabase Auth](https://supabase.com/docs/guides/auth/social-login/auth-google) is the recommended next step:
+
+1. Create a Supabase project and copy its **Project URL** and **anon public key**.
+2. In Supabase Authentication → Providers → Google, add the Google OAuth **Client ID** and **Client Secret** from Google Cloud Console. Add the deployed site URL to Supabase's redirect allow list.
+3. Add the Supabase browser client (the `@supabase/supabase-js` package, or its browser bundle) and wire `supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } })` to the existing button.
+4. Replace the placeholder values in `AUTH_CONFIG` with:
+
+   ```js
+   const AUTH_CONFIG = {
+     provider: "supabase",
+     configured: true,
+     supabaseUrl: "https://<project-ref>.supabase.co",
+     supabaseAnonKey: "<supabase-anon-public-key>",
+     redirectUrl: window.location.origin,
+   };
+   ```
+
+   For Vercel, store the same values as `SUPABASE_URL` and `SUPABASE_ANON_KEY` environment variables and expose them through the static build/config step. Never put a Supabase service-role key or Google client secret in browser code.
+5. Subscribe to `supabase.auth.onAuthStateChange` and update the account dialog/profile from the returned session. Keep the signed-out state as the fallback when there is no session.
+
+The current app has no Supabase client, OAuth callback, backend session, or real Google credential. Until those steps are completed, the rest of the planner remains a local visual prototype and no account data is persisted remotely.
+
 ## Local preview
 
 From this directory, run:
