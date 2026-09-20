@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f7f8fc" />
+    <title>Gatherly — Make time for each other</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#" aria-label="Gatherly home"><span class="brand-mark">✦</span><span>gatherly</span></a>
+        <nav class="main-nav" aria-label="Main navigation">
+          <a class="nav-item active" href="#overview"><span class="nav-icon">⌂</span>Overview</a>
+          <a class="nav-item" href="#availability"><span class="nav-icon">◷</span>Availability</a>
+          <a class="nav-item" href="#ideas"><span class="nav-icon">✣</span>Activity ideas</a>
+        </nav>
+        <div class="sidebar-bottom">
+          <button class="nav-item nav-button" id="calendarButton"><span class="nav-icon">↗</span>Calendar links</button>
+          <button class="nav-item nav-button" id="settingsButton"><span class="nav-icon">⚙</span>Settings</button>
+          <div class="profile-card">
+            <div class="avatar avatar-lilac">AM</div>
+            <div><strong>Alex Morgan</strong><small>Personal space</small></div>
+            <span class="more">•••</span>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <header class="topbar">
+          <button class="mobile-menu" aria-label="Open menu">☰</button>
+          <div class="breadcrumb"><span>Workspace</span><b>/</b><strong>Weekend crew</strong></div>
+          <div class="top-actions"><button class="icon-button" aria-label="Notifications">♧<i></i></button><div class="avatar avatar-lilac">AM</div></div>
+        </header>
+
+        <div class="content-wrap" id="overview">
+          <section class="hero">
+            <div>
+              <p class="eyebrow">SATURDAY, SEPTEMBER 20 <span class="live-dot"></span> LIVE</p>
+              <h1>Make time for <em>each other.</em></h1>
+              <p class="hero-copy">Find a moment that works for everyone, then fill it with something worth remembering.</p>
+            </div>
+            <button class="primary-button" id="inviteButton"><span>＋</span> Invite a friend</button>
+          </section>
+
+          <section class="status-row" aria-label="Planning status">
+            <div class="status-card"><div class="status-icon green">✓</div><div><small>YOUR AVAILABILITY</small><strong>Ready to share</strong></div><button class="text-button" data-scroll="availability">Edit</button></div>
+            <div class="status-card"><div class="status-icon yellow">◷</div><div><small>THIS WEEKEND</small><strong>3 overlaps found</strong></div><button class="text-button" data-scroll="availability">View</button></div>
+            <div class="status-card privacy-status"><div class="status-icon purple">◉</div><div><small>PRIVACY</small><strong id="privacyStatus">Busy / free only</strong></div><button class="text-button" id="privacyButton">Manage</button></div>
+          </section>
+
+          <div class="section-heading" id="availability">
+            <div><p class="eyebrow">THE GROUP</p><h2>When is everyone free?</h2><p>Hover over a block to see who’s in. Details stay private by default.</p></div>
+            <div class="week-switcher"><button aria-label="Previous week">‹</button><strong>Sep 22 – 28, 2025</strong><button aria-label="Next week">›</button></div>
+          </div>
+
+          <section class="availability-card">
+            <div class="availability-header"><div class="legend"><span><i class="legend-dot overlap"></i>Everyone’s free</span><span><i class="legend-dot partial"></i>Some are free</span><span><i class="legend-dot busy"></i>Busy</span></div><button class="outline-button" id="shareButton">↗ Share view</button></div>
+            <div class="calendar-grid" role="grid" aria-label="Group availability for September 22 to 28">
+              <div class="grid-corner">GMT−5</div><div class="day"><small>MON</small><strong>22</strong></div><div class="day"><small>TUE</small><strong>23</strong></div><div class="day today"><small>WED</small><strong>24</strong><span>Today</span></div><div class="day"><small>THU</small><strong>25</strong></div><div class="day"><small>FRI</small><strong>26</strong></div>
+              <div class="time-label">8 AM</div><div class="slot busy"></div><div class="slot partial"></div><div class="slot busy"></div><div class="slot busy"></div><div class="slot partial"></div>
+              <div class="time-label">10 AM</div><div class="slot partial"></div><div class="slot overlap selected" tabindex="0" aria-label="Tuesday 10 AM, everyone free"></div><div class="slot overlap"></div><div class="slot partial"></div><div class="slot overlap"></div>
+              <div class="time-label">12 PM</div><div class="slot busy"></div><div class="slot overlap"></div><div class="slot overlap"></div><div class="slot overlap"></div><div class="slot partial"></div>
+              <div class="time-label">2 PM</div><div class="slot overlap"></div><div class="slot overlap"></div><div class="slot partial"></div><div class="slot busy"></div><div class="slot overlap"></div>
+              <div class="time-label">4 PM</div><div class="slot partial"></div><div class="slot overlap"></div><div class="slot overlap"></div><div class="slot partial"></div><div class="slot overlap"></div>
+              <div class="time-label">6 PM</div><div class="slot overlap"></div><div class="slot partial"></div><div class="slot overlap"></div><div class="slot overlap"></div><div class="slot overlap"></div>
+            </div>
+            <div class="selected-window"><div class="window-icon">✦</div><div><strong>Tuesday, September 23 · 10:00 AM</strong><p>Everyone is free for a 2-hour window</p></div><button class="primary-button small" id="planButton">Plan something <span>→</span></button></div>
+          </section>
+
+          <section class="people-section">
+            <div class="section-heading compact"><div><p class="eyebrow">5 PEOPLE</p><h2>Everyone’s in the loop</h2></div><button class="text-button" id="managePeople">Manage people <span>→</span></button></div>
+            <div class="people-grid">
+              <article class="person-card"><div class="person-top"><div class="avatar avatar-coral">JM</div><span class="presence"></span></div><strong>Jamie Miller</strong><small>Updated 12m ago</small><span class="person-status">✓ All set</span></article>
+              <article class="person-card"><div class="person-top"><div class="avatar avatar-mint">TK</div><span class="presence"></span></div><strong>Taylor Kim</strong><small>Updated 1h ago</small><span class="person-status">✓ All set</span></article>
+              <article class="person-card"><div class="person-top"><div class="avatar avatar-yellow">RL</div><span class="presence away"></span></div><strong>Riley Lee</strong><small>Updated yesterday</small><span class="person-status muted">Needs update</span></article>
+              <article class="person-card add-person" id="addPerson"><div class="add-icon">＋</div><strong>Add someone</strong><small>Invite a friend to join</small></article>
+            </div>
+          </section>
+
+          <section class="ideas-section" id="ideas">
+            <div class="section-heading compact"><div><p class="eyebrow">MAKE IT COUNT</p><h2>What sounds good?</h2></div><button class="outline-button" id="addIdea">＋ Add an idea</button></div>
+            <div class="idea-grid">
+              <article class="idea-card selected-idea"><div class="idea-image brunch"><span>☕</span><button class="heart" aria-label="Remove brunch idea">♥</button></div><div class="idea-content"><span class="tag">POPULAR</span><h3>Slow morning brunch</h3><p>Good coffee, no rush, extra syrup.</p><div class="idea-meta"><span>⌖ Anywhere</span><span>♡ 4 votes</span></div></div></article>
+              <article class="idea-card"><div class="idea-image park"><span>☀</span><button class="heart" aria-label="Like park idea">♡</button></div><div class="idea-content"><span class="tag green-tag">OUTSIDE</span><h3>Picnic in the park</h3><p>Fresh air and a blanket in the sun.</p><div class="idea-meta"><span>⌖ Riverside Park</span><span>♡ 2 votes</span></div></div></article>
+              <article class="idea-card"><div class="idea-image games"><span>✦</span><button class="heart" aria-label="Like games idea">♡</button></div><div class="idea-content"><span class="tag purple-tag">COZY</span><h3>Games night</h3><p>Bring your best strategy and snacks.</p><div class="idea-meta"><span>⌖ At someone’s place</span><span>♡ 3 votes</span></div></div></article>
+            </div>
+          </section>
+
+          <footer><span>Made for the moments between plans.</span><span>Privacy-first by design <b>✦</b></span></footer>
+        </div>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <dialog id="privacyDialog"><div class="dialog-header"><div><p class="eyebrow">PRIVACY CONTROLS</p><h2>Your calendar, your call.</h2></div><button class="close-dialog" aria-label="Close">×</button></div><p class="dialog-copy">Choose how much detail your friends can see. You can change this for each event when you add one.</p><div class="privacy-options"><label class="privacy-option active"><input type="radio" name="privacy" value="busy" checked /><span class="radio"></span><span><strong>Busy / free only</strong><small>Show available time blocks without event names or locations.</small></span></label><label class="privacy-option"><input type="radio" name="privacy" value="details" /><span class="radio"></span><span><strong>Show event details</strong><small>Share names and locations so friends can plan around them.</small></span></label></div><button class="primary-button full" id="savePrivacy">Save privacy setting</button></dialog>
+    <dialog id="calendarDialog"><div class="dialog-header"><div><p class="eyebrow">OPTIONAL INTEGRATION</p><h2>Connect a calendar.</h2></div><button class="close-dialog" aria-label="Close">×</button></div><p class="dialog-copy">Import busy times automatically, or paste a read-only calendar link. We’ll never edit your events.</p><div class="integration-option"><div class="integration-icon google">G</div><div><strong>Google Calendar</strong><small>Sync your availability in one click.</small></div><button class="outline-button connect-button">Connect</button></div><div class="integration-option"><div class="integration-icon apple">●</div><div><strong>Apple / iCloud calendar</strong><small>Paste a read-only calendar URL.</small></div><button class="outline-button connect-button">Add link</button></div><p class="privacy-note">▣ <strong>Private by default.</strong> You decide what friends see.</p></dialog>
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,14 @@
+# OS metadata
+.DS_Store
+
+# Local tooling and generated output
+node_modules/
+.vercel/
+dist/
+build/
+*.log
+
+# Local environment files
+.env
+.env.*
+!.env.example
