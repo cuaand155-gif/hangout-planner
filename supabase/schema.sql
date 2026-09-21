@@ -43,6 +43,15 @@ create table if not exists public.friendships (
   unique (requester_id, addressee_id)
 );
 
+create table if not exists public.friend_invites (
+  id uuid primary key default gen_random_uuid(),
+  sender_id uuid not null references public.profiles(id) on delete cascade,
+  recipient_email text not null,
+  note text,
+  status text not null default 'pending' check (status in ('pending', 'accepted', 'declined')),
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.calendar_connections (
   id uuid primary key default gen_random_uuid(),
   profile_id uuid not null references public.profiles(id) on delete cascade,
@@ -54,3 +63,21 @@ create table if not exists public.calendar_connections (
 alter table public.profiles enable row level security;
 alter table public.friendships enable row level security;
 alter table public.calendar_connections enable row level security;
+alter table public.friend_invites enable row level security;
+
+create policy "Profiles are visible to signed-in users"
+  on public.profiles for select to authenticated using (true);
+create policy "Users manage their own profile"
+  on public.profiles for all to authenticated using (auth.uid() = id) with check (auth.uid() = id);
+create policy "Users can view their friendships"
+  on public.friendships for select to authenticated
+  using (auth.uid() = requester_id or auth.uid() = addressee_id);
+create policy "Users can create friend requests"
+  on public.friendships for insert to authenticated
+  with check (auth.uid() = requester_id);
+create policy "Users can manage their invites"
+  on public.friend_invites for all to authenticated
+  using (auth.uid() = sender_id) with check (auth.uid() = sender_id);
+create policy "Users manage their calendar connections"
+  on public.calendar_connections for all to authenticated
+  using (auth.uid() = profile_id) with check (auth.uid() = profile_id);

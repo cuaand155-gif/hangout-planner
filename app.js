@@ -13,6 +13,7 @@ const supabase = AUTH_CONFIG.configured && window.supabase
   : null;
 const toast = document.getElementById("toast");
 let workspaceState = null;
+let currentUser = null;
 
 const sampleState = {
   privacy: "busy",
@@ -138,8 +139,21 @@ document.querySelectorAll(".people-tab").forEach((tab) => tab.addEventListener("
 }));
 document.getElementById("friendForm").addEventListener("submit", (event) => {
   event.preventDefault();
-  people.friends.push({ name: document.getElementById("friendName").value.trim() });
+  const friend = {
+    name: document.getElementById("friendName").value.trim(),
+    email: document.getElementById("friendEmail").value.trim(),
+  };
+  people.friends.push(friend);
   window.localStorage.setItem("gatherly-people", JSON.stringify(people));
+  if (supabase && currentUser && friend.email) {
+    supabase.from("friend_invites").insert({
+      sender_id: currentUser.id,
+      recipient_email: friend.email,
+      note: `Join my Gatherly circle, ${friend.name}.`,
+    }).then(({ error }) => {
+      if (error) showToast("Friend saved locally; invite sync needs the database setup.");
+    });
+  }
   event.target.reset();
   renderPeople();
   showToast("Friend added to your circle.");
@@ -153,7 +167,7 @@ document.getElementById("groupForm").addEventListener("submit", (event) => {
   showToast("Friend group created.");
 });
 const profileForm = document.getElementById("profileForm");
-const savedProfile = JSON.parse(window.localStorage.getItem("gatherly-profile") || '{"name":"Alex Morgan","photo":"","shareSchedule":true}');
+let savedProfile = JSON.parse(window.localStorage.getItem("gatherly-profile") || '{"name":"Alex Morgan","photo":"","shareSchedule":true}');
 const applyProfile = (profile) => {
   document.getElementById("profileName").textContent = profile.name || "Alex Morgan";
   document.getElementById("profileSubtitle").textContent = profile.shareSchedule ? "Availability shared" : "Private schedule";
@@ -176,21 +190,51 @@ profileForm.addEventListener("submit", (event) => {
     shareSchedule: document.getElementById("profileShareSchedule").checked,
   };
   window.localStorage.setItem("gatherly-profile", JSON.stringify(profile));
+  savedProfile = profile;
+  if (supabase && currentUser) {
+    supabase.from("profiles").upsert({
+      id: currentUser.id,
+      display_name: profile.name,
+      photo_url: profile.photo || null,
+      share_schedule: profile.shareSchedule,
+      updated_at: new Date().toISOString(),
+    }).then(({ error }) => {
+      if (error) showToast("Profile saved locally; database sync needs the schema setup.");
+    });
+  }
   applyProfile(profile);
   profileDialog.close();
   showToast("Profile saved. Friends will see your updated availability setting.");
 });
-document.getElementById("googleCalendarButton").addEventListener("click", () => {
-  if (supabase) {
-    showToast("Google Calendar connection needs the Calendar OAuth scope configured in Supabase.");
-  } else {
+document.getElementById("googleCalendarButton").addEventListener("click", async () => {
+  if (!supabase) {
     showToast("Connect the backend to sync Google Calendar availability.");
+    return;
   }
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: `${window.location.origin}/?calendar=connected`,
+      queryParams: {
+        access_type: "offline",
+        prompt: "consent",
+        scope: "https://www.googleapis.com/auth/calendar.readonly",
+      },
+    },
+  });
+  if (error) showToast("Google Calendar connection could not start.");
 });
 document.getElementById("appleCalendarButton").addEventListener("click", () => showToast("Paste an iCloud read-only link in the next step."));
 document.getElementById("shareScheduleToggle").addEventListener("change", (event) => {
   const profile = { ...savedProfile, shareSchedule: event.target.checked };
+  savedProfile = profile;
   window.localStorage.setItem("gatherly-profile", JSON.stringify(profile));
+  if (supabase && currentUser) {
+    supabase.from("profiles").update({
+      share_schedule: profile.shareSchedule,
+      updated_at: new Date().toISOString(),
+    }).eq("id", currentUser.id);
+  }
   applyProfile(profile);
   showToast(event.target.checked ? "Friends can see your free/busy blocks." : "Your schedule is private.");
 });
@@ -221,6 +265,7 @@ tentativePlanForm.addEventListener("submit", (event) => {
 
 const googleSignInButton = document.getElementById("googleSignInButton");
 const updateAccount = (user) => {
+  currentUser = user || null;
   const signedIn = Boolean(user);
   const displayName = user?.user_metadata?.full_name || user?.user_metadata?.name || "Google account";
   document.getElementById("accountStatus").textContent = signedIn ? "Signed in" : "Not signed in";
@@ -230,7 +275,17 @@ const updateAccount = (user) => {
 };
 
 if (supabase) {
-  supabase.auth.getSession().then(({ data }) => updateAccount(data.session?.user));
+  supabase.auth.getSession().then(async ({ data }) => {
+    updateAccount(data.session?.user);
+    if (data.session?.user) {
+      const { data: profile } = await supabase.from("profiles").select("display_name, photo_url, share_schedule").eq("id", data.session.user.id).maybeSingle();
+      if (profile) {
+        savedProfile = { name: profile.display_name, photo: profile.photo_url || "", shareSchedule: profile.share_schedule };
+        window.localStorage.setItem("gatherly-profile", JSON.stringify(savedProfile));
+        applyProfile(savedProfile);
+      }
+    }
+  });
   supabase.auth.onAuthStateChange((_event, session) => updateAccount(session?.user));
 }
 
