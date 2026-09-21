@@ -1,6 +1,15 @@
 # Deploy Hangout Planner
 
-Hangout Planner is a dependency-free static site. There is no build step: deploy the project folder as-is, with `index.html` at the site root.
+Hangout Planner has no frontend build step, but it now uses a small serverless API for shared workspace state. Deploy the project folder as-is, with `index.html` at the site root.
+
+## Connect persistence
+
+1. Create a Supabase project.
+2. Run [`supabase/schema.sql`](supabase/schema.sql) in the Supabase SQL editor.
+3. Add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` as server-side environment variables in your host. Copy the names from [`.env.example`](.env.example); never expose the service-role key in browser code.
+4. Redeploy. Without these variables, the UI intentionally falls back to demo data and does not persist changes between visitors.
+
+The schema also includes profiles (display name, photo URL, and schedule visibility), friend requests, and calendar connection records. Google Calendar OAuth still requires enabling the Google provider and Calendar scope in Supabase; the UI deliberately explains that requirement instead of pretending a calendar was connected. The current prototype keeps profile edits and friend invites in local storage until the signed-in Supabase user flow is connected to those tables.
 
 ## Vercel
 
@@ -21,7 +30,7 @@ Hangout Planner is a dependency-free static site. There is no build step: deploy
 
 1. Open Netlify's deploy page.
 2. Drag the project folder into the deploy area.
-3. Netlify serves `index.html` automatically.
+3. Netlify serves `index.html` automatically. The included `api/workspace.js` is Vercel-style; to make shared persistence work on Netlify, move that handler to a Netlify Function and update the browser endpoint. Otherwise, this app uses device-local fallback storage.
 
 ## GitHub Pages
 
@@ -30,7 +39,7 @@ Hangout Planner is a dependency-free static site. There is no build step: deploy
 3. Under **Build and deployment**, choose **Deploy from a branch**, select the publishing branch, and choose the `/ (root)` folder.
 4. Save and wait for the Pages URL to appear.
 
-Because this is a single-page static prototype with hash navigation, no rewrite configuration is required for the current routes.
+GitHub Pages can host the frontend only. It cannot run the included serverless API, so it will use device-local fallback storage unless you host the API separately and update its URL in `app.js`. No rewrite configuration is required for the current hash routes.
 
 ## Google sign-in setup
 
@@ -40,7 +49,7 @@ For a static site or Vercel deployment, [Supabase Auth](https://supabase.com/doc
 
 1. Create a Supabase project and copy its **Project URL** and **anon public key**.
 2. In Supabase Authentication → Providers → Google, add the Google OAuth **Client ID** and **Client Secret** from Google Cloud Console. Add the deployed site URL to Supabase's redirect allow list.
-3. Add the Supabase browser client (the `@supabase/supabase-js` package, or its browser bundle) and wire `supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } })` to the existing button.
+3. The static page already loads the Supabase browser client from jsDelivr and `app.js` already wires `supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } })` plus session updates to the existing account UI.
 4. Replace the placeholder values in `AUTH_CONFIG` with:
 
    ```js
