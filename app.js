@@ -8,7 +8,7 @@ const AUTH_CONFIG = {
   redirectUrl: window.location.origin,
 };
 
-const supabase = AUTH_CONFIG.configured && window.supabase
+const supabaseClient = AUTH_CONFIG.configured && window.supabase
   ? window.supabase.createClient(AUTH_CONFIG.supabaseUrl, AUTH_CONFIG.supabaseAnonKey)
   : null;
 const toast = document.getElementById("toast");
@@ -145,8 +145,8 @@ document.getElementById("friendForm").addEventListener("submit", (event) => {
   };
   people.friends.push(friend);
   window.localStorage.setItem("gatherly-people", JSON.stringify(people));
-  if (supabase && currentUser && friend.email) {
-    supabase.from("friend_invites").insert({
+  if (supabaseClient && currentUser && friend.email) {
+    supabaseClient.from("friend_invites").insert({
       sender_id: currentUser.id,
       recipient_email: friend.email,
       note: `Join my Gatherly circle, ${friend.name}.`,
@@ -191,8 +191,8 @@ profileForm.addEventListener("submit", (event) => {
   };
   window.localStorage.setItem("gatherly-profile", JSON.stringify(profile));
   savedProfile = profile;
-  if (supabase && currentUser) {
-    supabase.from("profiles").upsert({
+  if (supabaseClient && currentUser) {
+    supabaseClient.from("profiles").upsert({
       id: currentUser.id,
       display_name: profile.name,
       photo_url: profile.photo || null,
@@ -207,11 +207,11 @@ profileForm.addEventListener("submit", (event) => {
   showToast("Profile saved. Friends will see your updated availability setting.");
 });
 document.getElementById("googleCalendarButton").addEventListener("click", async () => {
-  if (!supabase) {
+  if (!supabaseClient) {
     showToast("Connect the backend to sync Google Calendar availability.");
     return;
   }
-  const { error } = await supabase.auth.signInWithOAuth({
+  const { error } = await supabaseClient.auth.signInWithOAuth({
     provider: "google",
     options: {
       redirectTo: `${window.location.origin}/?calendar=connected`,
@@ -229,8 +229,8 @@ document.getElementById("shareScheduleToggle").addEventListener("change", (event
   const profile = { ...savedProfile, shareSchedule: event.target.checked };
   savedProfile = profile;
   window.localStorage.setItem("gatherly-profile", JSON.stringify(profile));
-  if (supabase && currentUser) {
-    supabase.from("profiles").update({
+  if (supabaseClient && currentUser) {
+    supabaseClient.from("profiles").update({
       share_schedule: profile.shareSchedule,
       updated_at: new Date().toISOString(),
     }).eq("id", currentUser.id);
@@ -274,11 +274,11 @@ const updateAccount = (user) => {
   document.getElementById("profileSubtitle").textContent = signedIn ? "Google account" : "Personal space";
 };
 
-if (supabase) {
-  supabase.auth.getSession().then(async ({ data }) => {
+if (supabaseClient) {
+  supabaseClient.auth.getSession().then(async ({ data }) => {
     updateAccount(data.session?.user);
     if (data.session?.user) {
-      const { data: profile } = await supabase.from("profiles").select("display_name, photo_url, share_schedule").eq("id", data.session.user.id).maybeSingle();
+      const { data: profile } = await supabaseClient.from("profiles").select("display_name, photo_url, share_schedule").eq("id", data.session.user.id).maybeSingle();
       if (profile) {
         savedProfile = { name: profile.display_name, photo: profile.photo_url || "", shareSchedule: profile.share_schedule };
         window.localStorage.setItem("gatherly-profile", JSON.stringify(savedProfile));
@@ -286,7 +286,7 @@ if (supabase) {
       }
     }
   });
-  supabase.auth.onAuthStateChange((_event, session) => updateAccount(session?.user));
+  supabaseClient.auth.onAuthStateChange((_event, session) => updateAccount(session?.user));
 }
 
 googleSignInButton.addEventListener("click", async () => {
@@ -296,7 +296,7 @@ googleSignInButton.addEventListener("click", async () => {
     return;
   }
 
-  const { error } = await supabase.auth.signInWithOAuth({
+  const { error } = await supabaseClient.auth.signInWithOAuth({
     provider: "google",
     options: { redirectTo: AUTH_CONFIG.redirectUrl },
   });
