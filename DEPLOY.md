@@ -5,7 +5,7 @@ Hangout Planner has no frontend build step, but it now uses a small serverless A
 ## Connect persistence
 
 1. Create a Supabase project.
-2. Run [`supabase/schema.sql`](supabase/schema.sql) in the Supabase SQL editor.
+2. Open [`supabase/schema.sql`](supabase/schema.sql) on GitHub, click **Raw**, copy the SQL contents, paste the contents into a new Supabase SQL Editor query, and click **Run**. Do not paste the filename or path itself (`supabase/schema.sql`) into the editor; that is not SQL.
 3. Add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` as server-side environment variables in your host. Copy the names from [`.env.example`](.env.example); never expose the service-role key in browser code.
 4. Redeploy. Without these variables, the UI intentionally falls back to demo data and does not persist changes between visitors.
 
