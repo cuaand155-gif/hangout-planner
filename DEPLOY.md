@@ -51,7 +51,27 @@ It carries a person's profile between devices and enables workspace locking.
    The publishable (anon) key is designed to be in browser code; the
    service-role key is not. Only ever put the publishable one here.
 
-## 3. Google Calendar import (optional)
+## 3. Friend requests (optional)
+
+Friend requests ride on the same accounts as sign-in and need no extra
+configuration — just the `friend_requests` table, which is in
+`supabase/schema.sql` from step 1. If you ran an earlier version of the schema,
+run it again; every statement is safe to repeat.
+
+Two things worth knowing about how it is secured:
+
+- A request is addressed to an **email**, so you can invite somebody who has
+  not signed up yet. The read policy therefore matches on the email inside the
+  caller's own token, which means nobody can read requests by guessing at
+  someone else's address.
+- Only the recipient can accept or decline, and the update policy does not let
+  that write change who the request was from or to.
+
+The schema also adds a trigger that creates a `profiles` row for every new
+account, so requests show a name rather than a bare email address. Nobody is
+emailed: a request waits in the app until the recipient next signs in.
+
+## 4. Google Calendar import (optional)
 
 Add the Calendar scope `https://www.googleapis.com/auth/calendar.readonly` to
 the same Google OAuth client. Gatherly requests it only when somebody clicks

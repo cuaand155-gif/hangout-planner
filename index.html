@@ -140,7 +140,7 @@
           <section class="people-section">
             <div class="section-heading compact">
               <div><p class="eyebrow" id="peopleCount">PEOPLE</p><h2>Everyone’s in the loop</h2></div>
-              <button class="text-button" id="managePeople">Manage people <span>→</span></button>
+              <button class="text-button" id="managePeople">Manage people <span id="friendBadge" class="count-badge" hidden></span> <span>→</span></button>
             </div>
             <div class="people-grid" id="peopleGrid"></div>
           </section>
@@ -234,6 +234,7 @@
       <div class="copy-row"><input class="text-input" id="inviteLink" readonly /><button class="outline-button" id="copyInviteLink" type="button">Copy</button></div>
       <div class="people-tabs">
         <button class="people-tab active" data-people-tab="friend">Add a person</button>
+        <button class="people-tab" data-people-tab="friends" id="friendsTab">Friends</button>
         <button class="people-tab" data-people-tab="group">Rename group</button>
       </div>
       <form id="friendForm" class="people-form">
@@ -244,12 +245,41 @@
         <p class="form-hint">They’ll show as waiting for times until they open the link and add their own.</p>
         <button class="primary-button full" type="submit">Add to this group</button>
       </form>
+      <div id="friendsPanel" class="people-form" hidden>
+        <div id="friendsSignedOut" hidden>
+          <p class="form-hint">Friend requests need an account, so both people can be reached. The invite link above works without one.</p>
+          <button class="google-button" id="friendsSignInButton" type="button"><span class="google-logo">G</span> Continue with Google</button>
+        </div>
+        <div id="friendsSignedIn" hidden>
+          <form id="friendRequestForm">
+            <label class="field-label" for="friendRequestEmail">Send a friend request</label>
+            <div class="copy-row">
+              <input class="text-input" id="friendRequestEmail" type="email" placeholder="jordan@example.com" maxlength="120" />
+              <button class="outline-button" type="submit" id="sendFriendRequest">Send</button>
+            </div>
+            <p class="form-hint">They'll see it the next time they sign in, even if they don't have an account yet.</p>
+          </form>
+          <div class="friend-section" id="incomingSection" hidden>
+            <p class="eyebrow">WAITING FOR YOU</p>
+            <div class="friend-list" id="incomingList"></div>
+          </div>
+          <div class="friend-section" id="outgoingSection" hidden>
+            <p class="eyebrow">SENT</p>
+            <div class="friend-list" id="outgoingList"></div>
+          </div>
+          <div class="friend-section">
+            <p class="eyebrow">YOUR FRIENDS</p>
+            <div class="friend-list" id="friendList"></div>
+          </div>
+        </div>
+      </div>
       <form id="groupForm" class="people-form" hidden>
         <label class="field-label" for="groupName">Group name</label>
         <input class="text-input" id="groupName" placeholder="Weekend crew" required maxlength="60" />
         <p class="form-hint">This is the name everyone sees at the top of the planner.</p>
         <button class="primary-button full" type="submit">Save group name</button>
       </form>
+      <p class="eyebrow roster-label">IN THIS GROUP</p>
       <div class="saved-people" id="savedPeople"></div>
     </dialog>
 

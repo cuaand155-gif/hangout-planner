@@ -30,6 +30,8 @@ import {
   voteCount,
   widenCoverage,
 } from "./lib/planner.js";
+import { applyMembership, findMemberForParty, linkMemberToParty, normalizeEmail, planManualClaim, resolveMembership } from "./lib/membership.js";
+import { createFriendStore, describeParty, partitionRequests, profileIdsFor, rejectionFor } from "./lib/friends.js";
 
 // Browser-safe credentials: the publishable (anon) key is designed to ship in
 // client code. Row level security in supabase/schema.sql is what protects data.
@@ -111,6 +113,9 @@ let memberId = window.localStorage.getItem(STORAGE.member) || createId("member")
 window.localStorage.setItem(STORAGE.member, memberId);
 
 let calendarSources = readJson(STORAGE.sources, []);
+
+const friendStore = supabaseClient ? createFriendStore(supabaseClient) : null;
+const friends = { rows: [], profiles: {}, loaded: false, busy: false };
 
 let demoNoticeShown = false;
 const noteDemoMode = () => {
@@ -273,54 +278,80 @@ async function applyAndSave(apply, { note } = {}) {
   return false;
 }
 
-/** Adds the local person to the workspace, reusing their row rather than duplicating it. */
+/**
+ * Makes sure exactly one member row represents the person at this browser.
+ * The decision is recomputed inside the save so that a retry after somebody
+ * else's edit still lands on the right row. See lib/membership.js.
+ */
 async function ensureMembership() {
-  const user = ui.user;
-  const existing = session.state.members.find(
-    (member) => member.id === memberId || (user && member.userId === user.id)
-  );
+  const wantedName = profile.name || displayName();
+  const plan = resolveMembership({ members: session.state.members, localMemberId: memberId, user: ui.user });
+  const current = session.state.members.find((member) => member.id === plan.id);
 
-  if (existing) {
-    if (existing.id !== memberId) memberId = existing.id;
-    window.localStorage.setItem(STORAGE.member, memberId);
-    const wantsName = profile.name || existing.name;
-    const needsUpdate =
-      existing.name !== wantsName ||
-      existing.sharesSchedule !== profile.shareSchedule ||
-      (user && existing.userId !== user.id) ||
-      existing.pending;
-    if (!needsUpdate) return;
-    await mutate((draft) => {
-      const member = draft.members.find((entry) => entry.id === memberId);
-      if (!member) return;
-      member.name = wantsName;
-      member.initials = initialsFor(wantsName);
-      member.sharesSchedule = profile.shareSchedule;
-      member.pending = false;
-      if (user) member.userId = user.id;
-      member.updatedAt = new Date().toISOString();
-    });
+  const settled =
+    plan.action !== "create" &&
+    !plan.absorb &&
+    current &&
+    current.name === wantedName &&
+    current.sharesSchedule === profile.shareSchedule &&
+    !current.pending &&
+    (!ui.user || current.userId === ui.user.id);
+  if (settled) {
+    if (memberId !== current.id) rememberMemberId(current.id);
     return;
   }
 
-  const name = displayName();
+  const joining = plan.action === "create";
+  let resolvedId = memberId;
   await mutate(
     (draft) => {
-      draft.members.push({
-        id: memberId,
-        name,
-        initials: initialsFor(name),
-        palette: AVATAR_PALETTES[draft.members.length % AVATAR_PALETTES.length],
+      const fresh = resolveMembership({ members: draft.members, localMemberId: memberId, user: ui.user });
+      resolvedId = applyMembership(draft, fresh, {
+        user: ui.user,
+        name: wantedName,
         sharesSchedule: profile.shareSchedule,
-        weekly: [],
-        busy: [],
-        ...(user ? { userId: user.id } : {}),
-        updatedAt: new Date().toISOString(),
-      });
-      if (user && !draft.ownerId) draft.ownerId = user.id;
+        palettes: AVATAR_PALETTES,
+        createId: () => createId("member"),
+      }) || memberId;
+    },
+    joining ? { note: `${wantedName} joined` } : undefined
+  );
+  rememberMemberId(resolvedId);
+}
+
+function rememberMemberId(id) {
+  if (!id || id === memberId) return;
+  memberId = id;
+  window.localStorage.setItem(STORAGE.member, memberId);
+  // Which row is "you" changes what the whole page shows, so redraw.
+  render();
+}
+
+/** Lets somebody without an account say "that invite is me". */
+async function claimInvite(targetId) {
+  const plan = planManualClaim({ members: session.state.members, localMemberId: memberId, targetId });
+  if (!plan) return;
+  const name = profile.name || session.state.members.find((member) => member.id === targetId)?.name || displayName();
+  let resolvedId = memberId;
+  await mutate(
+    (draft) => {
+      const fresh = planManualClaim({ members: draft.members, localMemberId: memberId, targetId });
+      if (!fresh) return;
+      resolvedId = applyMembership(draft, fresh, {
+        user: ui.user,
+        name,
+        sharesSchedule: profile.shareSchedule,
+        palettes: AVATAR_PALETTES,
+        createId: () => createId("member"),
+      }) || memberId;
     },
     { note: `${name} joined` }
   );
+  rememberMemberId(resolvedId);
+  profile = { ...profile, name };
+  writeJson(STORAGE.profile, profile);
+  renderSavedPeople();
+  showToast(`You're in as ${name}.`);
 }
 
 /* ------------------------------------------------------------ rendering */
@@ -1431,6 +1462,224 @@ function renderSavedPeople() {
       }</div>`
     )
     .join("");
+  renderClaimPrompt();
+  renderFriends();
+}
+
+/**
+ * Somebody who opened an invite link without an account can say which pending
+ * person they are, instead of adding themselves a second time.
+ */
+function renderClaimPrompt() {
+  const container = $("savedPeople");
+  const claimable = session.state.members.filter((member) => member.pending && member.id !== memberId);
+  const existing = container.parentElement.querySelector(".claim-row");
+  if (existing) existing.remove();
+  if (!claimable.length) return;
+
+  const row = document.createElement("div");
+  row.className = "claim-row";
+  row.innerHTML = `<span>Are you one of these people?</span>
+    <select class="text-input" id="claimTarget">${claimable
+      .map((member) => `<option value="${escapeAttribute(member.id)}">${escapeHtml(member.name)}</option>`)
+      .join("")}</select>
+    <button class="outline-button" type="button" id="claimInviteButton">That's me</button>`;
+  container.after(row);
+  $("claimInviteButton").addEventListener("click", () => claimInvite($("claimTarget").value));
+}
+
+/* ------------------------------------------------------------- friends */
+
+async function loadFriends({ force = false } = {}) {
+  if (!friendStore || !ui.user) {
+    friends.rows = [];
+    friends.profiles = {};
+    friends.loaded = false;
+    renderFriends();
+    return;
+  }
+  if (friends.loaded && !force) return;
+  const { data, error } = await friendStore.list();
+  if (error) {
+    friends.loaded = false;
+    renderFriends(error.message);
+    return;
+  }
+  friends.rows = data;
+  const { data: profiles } = await friendStore.profiles(profileIdsFor(data));
+  friends.profiles = profiles || {};
+  friends.loaded = true;
+  renderFriends();
+}
+
+function friendGroups() {
+  return partitionRequests(friends.rows, { userId: ui.user?.id, email: ui.user?.email });
+}
+
+function friendRowMarkup(row, actions) {
+  const party = describeParty(row, { userId: ui.user?.id, profiles: friends.profiles });
+  const photo = safeImageUrl(party.photo);
+  return `<div class="friend-row">
+    <div class="avatar avatar-lilac"${photo ? ` style="background-image:url(&quot;${escapeAttribute(photo)}&quot;);background-size:cover;background-position:center"` : ""}>${photo ? "" : escapeHtml(initialsFor(party.name))}</div>
+    <div><strong>${escapeHtml(party.name)}</strong><small>${escapeHtml(party.pendingSignup ? "Waiting for them to sign in" : party.email || "")}</small></div>
+    <div class="friend-actions">${actions}</div>
+  </div>`;
+}
+
+function renderFriends(errorMessage) {
+  const signedIn = Boolean(friendStore && ui.user);
+  $("friendsSignedOut").hidden = signedIn;
+  $("friendsSignedIn").hidden = !signedIn;
+  if (!signedIn) {
+    $("friendBadge").hidden = true;
+    return;
+  }
+
+  const { incoming, outgoing, friends: accepted } = friendGroups();
+
+  $("incomingSection").hidden = !incoming.length;
+  $("incomingList").innerHTML = incoming
+    .map((row) =>
+      friendRowMarkup(
+        row,
+        `<button type="button" class="accept" data-accept="${escapeAttribute(row.id)}">Accept</button><button type="button" class="quiet" data-decline="${escapeAttribute(row.id)}">Decline</button>`
+      )
+    )
+    .join("");
+
+  $("outgoingSection").hidden = !outgoing.length;
+  $("outgoingList").innerHTML = outgoing
+    .map((row) => friendRowMarkup(row, `<button type="button" class="quiet" data-withdraw="${escapeAttribute(row.id)}">Withdraw</button>`))
+    .join("");
+
+  $("friendList").innerHTML = accepted.length
+    ? accepted
+        .map((row) => {
+          const party = describeParty(row, { userId: ui.user?.id, profiles: friends.profiles });
+          const match = findMemberForParty(session.state.members, party);
+          // A row matched only by name is probably them, but nothing proves it
+          // yet — offer to link it rather than silently adding a second copy.
+          const linked = match && party.id && match.userId === party.id;
+          const action = linked
+            ? `<button type="button" disabled>In this group</button>`
+            : match
+              ? `<button type="button" data-add-friend="${escapeAttribute(row.id)}">Link to them</button>`
+              : `<button type="button" data-add-friend="${escapeAttribute(row.id)}">Add to group</button>`;
+          return friendRowMarkup(row, action);
+        })
+        .join("")
+    : `<p class="form-hint">${escapeHtml(errorMessage || "No friends yet. Send a request above, or just share the invite link.")}</p>`;
+
+  $("friendBadge").textContent = String(incoming.length);
+  $("friendBadge").hidden = incoming.length === 0;
+  $("friendsTab").textContent = incoming.length ? `Friends (${incoming.length})` : "Friends";
+}
+
+$("friendsSignInButton").addEventListener("click", () => {
+  dialogs.people.close();
+  openDialog(dialogs.account);
+});
+
+$("friendRequestForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!friendStore || !ui.user || friends.busy) return;
+  const field = $("friendRequestEmail");
+  const reason = rejectionFor(field.value, { email: ui.user.email, rows: friends.rows.filter((row) => row.requester_id === ui.user.id) });
+  if (reason) {
+    showToast(reason);
+    return;
+  }
+  friends.busy = true;
+  const button = $("sendFriendRequest");
+  button.disabled = true;
+  const { error } = await friendStore.send({
+    requesterId: ui.user.id,
+    email: field.value,
+    note: `${displayName()} wants to plan with you on Gatherly.`,
+  });
+  friends.busy = false;
+  button.disabled = false;
+  if (error) {
+    showToast(friendError(error));
+    return;
+  }
+  field.value = "";
+  await loadFriends({ force: true });
+  showToast("Friend request sent.");
+});
+
+function friendError(error) {
+  const message = String(error?.message || "");
+  if (/duplicate key|friend_requests_live_pair/i.test(message)) return "You already have a request waiting for them.";
+  if (/row-level security|permission/i.test(message)) return "Run supabase/schema.sql to enable friend requests.";
+  if (/relation .* does not exist|friend_requests/i.test(message)) return "Friend requests need the latest supabase/schema.sql.";
+  return "That did not go through. Try again in a moment.";
+}
+
+$("friendsPanel").addEventListener("click", async (event) => {
+  const target = event.target.closest("[data-accept], [data-decline], [data-withdraw], [data-add-friend]");
+  if (!target || !friendStore || !ui.user || friends.busy) return;
+  friends.busy = true;
+  target.disabled = true;
+
+  const { accept, decline, withdraw, addFriend } = target.dataset;
+  let error = null;
+  if (accept || decline) {
+    ({ error } = await friendStore.respond({ id: accept || decline, accept: Boolean(accept), userId: ui.user.id }));
+  } else if (withdraw) {
+    ({ error } = await friendStore.withdraw(withdraw));
+  } else if (addFriend) {
+    await addFriendToGroup(addFriend);
+  }
+
+  friends.busy = false;
+  if (error) {
+    target.disabled = false;
+    showToast(friendError(error));
+    return;
+  }
+  if (!addFriend) await loadFriends({ force: true });
+  if (accept) showToast("You're now friends.");
+  else if (decline) showToast("Request declined.");
+  else if (withdraw) showToast("Request withdrawn.");
+});
+
+/** Puts a friend in this workspace as a pending member they can claim. */
+async function addFriendToGroup(rowId) {
+  const row = friends.rows.find((entry) => entry.id === rowId);
+  if (!row) return;
+  const party = describeParty(row, { userId: ui.user?.id, profiles: friends.profiles });
+  const existing = findMemberForParty(session.state.members, party);
+  await mutate(
+    (draft) => {
+      const already = findMemberForParty(draft.members, party);
+      if (already) {
+        // Somebody already added them by hand: link that row to the account
+        // rather than leaving two copies of the same person in the group.
+        linkMemberToParty(already, party);
+        return;
+      }
+      draft.members.push({
+        id: createId("member"),
+        name: party.name,
+        initials: initialsFor(party.name),
+        palette: AVATAR_PALETTES[draft.members.length % AVATAR_PALETTES.length],
+        ...(party.id ? { userId: party.id } : {}),
+        ...(party.email ? { email: normalizeEmail(party.email) } : {}),
+        pending: true,
+        weekly: [],
+        busy: [],
+        updatedAt: new Date().toISOString(),
+      });
+    },
+    { note: `${party.name} was added` }
+  );
+  renderSavedPeople();
+  showToast(
+    existing
+      ? `${existing.name} was already here — now linked to their account.`
+      : `${party.name} added — they'll see this group when they sign in.`
+  );
 }
 
 $("managePeople").addEventListener("click", () => {
@@ -1443,7 +1692,9 @@ for (const tab of document.querySelectorAll(".people-tab")) {
     for (const item of document.querySelectorAll(".people-tab")) item.classList.remove("active");
     tab.classList.add("active");
     $("friendForm").hidden = tab.dataset.peopleTab !== "friend";
+    $("friendsPanel").hidden = tab.dataset.peopleTab !== "friends";
     $("groupForm").hidden = tab.dataset.peopleTab !== "group";
+    if (tab.dataset.peopleTab === "friends") loadFriends();
   });
 }
 
@@ -1452,8 +1703,13 @@ $("friendForm").addEventListener("submit", async (event) => {
   const name = $("friendName").value.trim();
   const email = $("friendEmail").value.trim();
   if (!name) return;
-  if (session.state.members.some((member) => member.name.toLowerCase() === name.toLowerCase())) {
-    showToast(`${name} is already in this group.`);
+  const clash = session.state.members.find(
+    (member) =>
+      member.name.toLowerCase() === name.toLowerCase() ||
+      (email && normalizeEmail(member.email) === normalizeEmail(email))
+  );
+  if (clash) {
+    showToast(`${clash.name} is already in this group.`);
     return;
   }
   await mutate(
@@ -1711,6 +1967,8 @@ for (const item of document.querySelectorAll(".nav-item")) {
 
 /* ------------------------------------------------------------- startup */
 
+let previousUserId = null;
+
 async function start() {
   renderSources();
   renderGoogleState();
@@ -1718,19 +1976,33 @@ async function start() {
 
   if (supabaseClient) {
     const { data } = await supabaseClient.auth.getSession();
+    previousUserId = data.session?.user?.id || null;
     captureProviderToken(data.session);
     renderAccount(data.session?.user);
-    supabaseClient.auth.onAuthStateChange((_event, authSession) => {
+    supabaseClient.auth.onAuthStateChange(async (_event, authSession) => {
+      const changed = (authSession?.user?.id || null) !== previousUserId;
+      previousUserId = authSession?.user?.id || null;
       captureProviderToken(authSession);
       renderAccount(authSession?.user);
       renderGoogleState();
+      if (!changed) return;
+      // A new sign-in may mean an invite addressed to this person is waiting.
+      friends.loaded = false;
+      if (authSession?.user) {
+        await loadRemoteProfile(authSession.user);
+        await ensureMembership();
+        await loadFriends({ force: true });
+      } else {
+        renderFriends();
+      }
     });
-    if (data.session?.user) loadRemoteProfile(data.session.user);
+    if (data.session?.user) await loadRemoteProfile(data.session.user);
   } else {
     renderAccount(null);
   }
 
   await loadWorkspace();
+  await loadFriends();
 
   // Coming back from the Google consent screen: pull busy times straight away.
   if (new URLSearchParams(window.location.search).has("calendar")) {
@@ -1764,7 +2036,19 @@ async function loadRemoteProfile(user) {
     .select("display_name, photo_url, share_schedule")
     .eq("id", user.id)
     .maybeSingle();
-  if (error || !data) return;
+  if (error) return;
+  if (!data) {
+    // First sign-in on a project without the profile trigger: create the row
+    // so friend requests can show a name instead of an email address.
+    await supabaseClient.from("profiles").upsert({
+      id: user.id,
+      display_name: displayName(),
+      photo_url: profile.photo || null,
+      share_schedule: profile.shareSchedule,
+      updated_at: new Date().toISOString(),
+    });
+    return;
+  }
   profile = {
     ...profile,
     name: data.display_name || profile.name,
