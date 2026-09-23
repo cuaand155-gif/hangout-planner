@@ -82,7 +82,7 @@ async function assertPublicHost(hostname) {
 }
 
 /** Follows redirects manually so every hop gets the same host checks. */
-async function fetchFeed(startUrl) {
+export async function fetchFeed(startUrl) {
   let target = startUrl;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
     await assertPublicHost(target.hostname);

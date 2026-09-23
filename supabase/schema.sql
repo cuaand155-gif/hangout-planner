@@ -187,3 +187,96 @@ create policy "Either side can remove a request"
 --     secret ICS address is never uploaded. Only the busy blocks are shared.
 -- If an earlier version of this schema created those tables, they are simply
 -- unused; drop them by hand if you want them gone.
+
+-- ---------------------------------------------------------------- booking links
+--
+-- One booking page per person. Visitors book through /api/book (service role),
+-- never through these tables directly, so there is no public insert or select:
+-- guests only ever see the open slots the API computes. Owners manage their own
+-- page and see their own bookings through RLS.
+
+create extension if not exists btree_gist with schema extensions;
+
+create table if not exists public.booking_pages (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null unique references auth.users(id) on delete cascade,
+  handle text not null unique check (handle ~ '^[a-z0-9][a-z0-9-]{2,47}$'),
+  title text not null default 'Book a time' check (char_length(title) between 1 and 80),
+  owner_name text not null default '' check (char_length(owner_name) <= 60),
+  settings jsonb not null default '{}'::jsonb,
+  -- Busy times published by the owner's app (start/end only, never titles).
+  busy jsonb not null default '[]'::jsonb check (jsonb_typeof(busy) = 'array'),
+  -- Calendar links the server reads to keep availability fresh while the app is closed.
+  ics_urls text[] not null default '{}' check (cardinality(ics_urls) <= 3),
+  busy_synced_at timestamptz,
+  feed_token text not null unique default encode(extensions.gen_random_bytes(18), 'hex'),
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.booking_pages enable row level security;
+
+drop policy if exists "Owners read their booking page" on public.booking_pages;
+create policy "Owners read their booking page"
+  on public.booking_pages for select to authenticated
+  using (auth.uid() = owner_id);
+
+drop policy if exists "Owners create their booking page" on public.booking_pages;
+create policy "Owners create their booking page"
+  on public.booking_pages for insert to authenticated
+  with check (auth.uid() = owner_id);
+
+drop policy if exists "Owners update their booking page" on public.booking_pages;
+create policy "Owners update their booking page"
+  on public.booking_pages for update to authenticated
+  using (auth.uid() = owner_id)
+  with check (auth.uid() = owner_id);
+
+drop policy if exists "Owners delete their booking page" on public.booking_pages;
+create policy "Owners delete their booking page"
+  on public.booking_pages for delete to authenticated
+  using (auth.uid() = owner_id);
+
+-- Owners may not reassign a page or pick their own feed token.
+revoke insert, update on public.booking_pages from authenticated;
+grant insert (owner_id, handle, title, owner_name, settings, busy, ics_urls, busy_synced_at, active) on public.booking_pages to authenticated;
+grant update (handle, title, owner_name, settings, busy, ics_urls, busy_synced_at, active, updated_at) on public.booking_pages to authenticated;
+
+create table if not exists public.bookings (
+  id uuid primary key default gen_random_uuid(),
+  page_id uuid not null references public.booking_pages(id) on delete cascade,
+  start_at timestamptz not null,
+  end_at timestamptz not null,
+  guest_name text not null check (char_length(guest_name) between 1 and 80),
+  guest_email text not null check (char_length(guest_email) between 3 and 254),
+  note text not null default '' check (char_length(note) <= 500),
+  status text not null default 'confirmed' check (status in ('confirmed', 'cancelled')),
+  cancel_token text not null unique default encode(extensions.gen_random_bytes(18), 'hex'),
+  created_at timestamptz not null default now(),
+  cancelled_at timestamptz,
+  constraint bookings_positive_length check (end_at > start_at),
+  -- Two confirmed bookings on one page can never overlap, even if two people
+  -- press "Book" at the same moment.
+  constraint bookings_no_overlap exclude using gist (page_id with =, tstzrange(start_at, end_at) with &&)
+    where (status = 'confirmed')
+);
+
+create index if not exists bookings_page_start on public.bookings (page_id, start_at);
+
+alter table public.bookings enable row level security;
+
+drop policy if exists "Owners read their bookings" on public.bookings;
+create policy "Owners read their bookings"
+  on public.bookings for select to authenticated
+  using (exists (select 1 from public.booking_pages p where p.id = page_id and p.owner_id = auth.uid()));
+
+drop policy if exists "Owners cancel their bookings" on public.bookings;
+create policy "Owners cancel their bookings"
+  on public.bookings for update to authenticated
+  using (exists (select 1 from public.booking_pages p where p.id = page_id and p.owner_id = auth.uid()))
+  with check (status = 'cancelled');
+
+revoke insert, update, delete on public.bookings from authenticated, anon;
+grant update (status, cancelled_at) on public.bookings to authenticated;
+revoke all on public.booking_pages, public.bookings from anon;
