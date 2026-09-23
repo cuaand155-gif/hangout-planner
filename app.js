@@ -37,6 +37,7 @@ import { forgetGroup, mergeGroups, newGroupSlug, rememberGroup } from "./lib/gro
 import { dueForSync, sameBusy } from "./lib/sync.js";
 import { isSafeImageDataUrl, squareCrop } from "./lib/avatar.js";
 import { PALETTES, normalizePalette } from "./lib/palettes.js";
+import { APPEARANCES, THEME_COLORS, normalizeAppearance, resolveTheme } from "./lib/appearance.js";
 
 // Browser-safe credentials: the publishable (anon) key is designed to ship in
 // client code. Row level security in supabase/schema.sql is what protects data.
@@ -61,6 +62,7 @@ const STORAGE = {
   added: "gatherly-calendar-added",
   pendingName: (slug) => `gatherly-new-group:${slug}`,
   palette: "gatherly-palette",
+  appearance: "gatherly-appearance",
 };
 
 const supabaseClient = AUTH_CONFIG.configured && window.supabase
@@ -2289,6 +2291,49 @@ $("palettePicker").addEventListener("click", (event) => {
   if (swatch) applyPalette(swatch.dataset.palette);
 });
 applyPalette(currentPalette());
+
+/* Appearance (per device): Auto follows the system setting, Light and Dark force it. */
+
+const systemDark = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+let appearance = currentAppearance();
+
+function currentAppearance() {
+  try {
+    return normalizeAppearance(window.localStorage.getItem(STORAGE.appearance));
+  } catch {
+    return normalizeAppearance(null);
+  }
+}
+
+function paintTheme() {
+  const theme = resolveTheme(appearance, Boolean(systemDark?.matches));
+  document.documentElement.dataset.theme = theme;
+  document.querySelector("meta[name=theme-color]")?.setAttribute("content", THEME_COLORS[theme]);
+}
+
+function applyAppearance(id, { animate = false } = {}) {
+  appearance = normalizeAppearance(id);
+  try {
+    window.localStorage.setItem(STORAGE.appearance, appearance);
+  } catch {
+    /* Private mode: the choice lasts for this visit only. */
+  }
+  for (const option of $("appearancePicker").children) option.setAttribute("aria-checked", String(option.dataset.appearance === appearance));
+  const changes = resolveTheme(appearance, Boolean(systemDark?.matches)) !== document.documentElement.dataset.theme;
+  const calm = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  if (animate && changes && !calm && document.startViewTransition) document.startViewTransition(paintTheme);
+  else paintTheme();
+}
+
+$("appearancePicker").innerHTML = APPEARANCES.map(
+  (option) => `<button type="button" class="palette-swatch" role="radio" aria-checked="false" data-appearance="${option.id}"><i><svg class="icon" aria-hidden="true"><use href="#${option.icon}"/></svg></i>${escapeHtml(option.name)}</button>`
+).join("");
+$("appearancePicker").addEventListener("click", (event) => {
+  const option = event.target.closest("[data-appearance]");
+  if (option) applyAppearance(option.dataset.appearance, { animate: true });
+});
+systemDark?.addEventListener?.("change", paintTheme);
+applyAppearance(appearance);
 
 $("settingsButton").addEventListener("click", () => {
   const config = settings();
