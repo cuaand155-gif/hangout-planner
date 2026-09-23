@@ -12,6 +12,7 @@
 // 409 with the current state instead of silently overwriting each other.
 
 import { createDemoState, normalizeWorkspaceState, slugify, stateTooLarge } from "../lib/planner.js";
+import { DEMO_SLUG, placeholderName } from "../lib/checklist.js";
 import { bearer, config, restHeaders, send, userFromToken } from "./_supabase.js";
 
 const MAX_BODY_BYTES = 512 * 1024;
@@ -19,7 +20,7 @@ const MAX_BODY_BYTES = 512 * 1024;
 /** A new workspace starts empty; the default slug keeps the sample crew. */
 function seedFor(slug) {
   return normalizeWorkspaceState(
-    slug === "weekend-crew" ? createDemoState() : { name: slug.replace(/-/g, " ").replace(/^./, (character) => character.toUpperCase()) }
+    slug === DEMO_SLUG ? createDemoState() : { name: placeholderName(slug) }
   );
 }
 

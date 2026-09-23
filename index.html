@@ -59,6 +59,19 @@
             </div>
           </section>
 
+          <section class="checklist-card" id="checklistCard" aria-labelledby="checklistTitle" hidden>
+            <div class="checklist-head">
+              <div>
+                <p class="eyebrow">GET STARTED</p>
+                <h2 id="checklistTitle">Get your group going.</h2>
+              </div>
+              <span class="checklist-count" id="checklistCount" aria-live="polite">0 of 3 done</span>
+              <button class="checklist-dismiss" id="dismissChecklist" aria-label="Hide the get started checklist"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
+            </div>
+            <div class="checklist-meter" aria-hidden="true"><i id="checklistMeter"></i></div>
+            <ol class="checklist-steps" id="checklistSteps"></ol>
+          </section>
+
           <section class="status-row" aria-label="Planning status">
             <div class="status-card">
               <div class="status-icon green" id="ownStatusIcon"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></div>
