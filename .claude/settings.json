@@ -1,12 +1,41 @@
 {
   "permissions": {
     "allow": [
+      "Bash",
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "NotebookEdit",
+      "WebFetch",
+      "WebSearch",
+      "mcp__Supabase",
+      "mcp__Vercel",
+      "mcp__github",
+      "mcp__Remote_Desktop_Commander",
+      "mcp__Claude_Code_Remote",
+      "mcp__Google_Drive",
+      "mcp__Google_Calendar",
+      "mcp__Gmail",
       "Bash(npm test)",
       "Bash(npm test *)",
       "mcp__Supabase__list_projects",
       "mcp__Supabase__list_tables",
       "mcp__Supabase__get_advisors",
       "mcp__Supabase__execute_sql"
+    ],
+    "ask": [
+      "mcp__Google_Calendar__create_event",
+      "mcp__Google_Calendar__update_event",
+      "mcp__Google_Calendar__delete_event",
+      "mcp__Google_Calendar__respond_to_event",
+      "mcp__Gmail__send_message",
+      "mcp__Gmail__reply",
+      "mcp__Gmail__forward",
+      "mcp__Supabase__pause_project",
+      "mcp__Supabase__delete_branch",
+      "mcp__Vercel__pause_project"
     ]
   }
 }

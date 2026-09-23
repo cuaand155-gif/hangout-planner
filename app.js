@@ -35,6 +35,7 @@ import { createFriendStore, describeParty, partitionRequests, profileIdsFor, rej
 import { buildPlanIcs, googleCalendarUrl, planUid } from "./lib/calendar-export.js";
 import { forgetGroup, mergeGroups, newGroupSlug, rememberGroup } from "./lib/groups.js";
 import { dueForSync, sameBusy } from "./lib/sync.js";
+import { isSafeImageDataUrl, squareCrop } from "./lib/avatar.js";
 
 // Browser-safe credentials: the publishable (anon) key is designed to ship in
 // client code. Row level security in supabase/schema.sql is what protects data.
@@ -719,6 +720,7 @@ function renderActivityBadge() {
 function safeImageUrl(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
+  if (raw.startsWith("data:")) return isSafeImageDataUrl(raw) ? raw : "";
   try {
     const parsed = new URL(raw, window.location.href);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
@@ -1518,9 +1520,7 @@ async function updateShareSchedule(shared) {
 for (const button of [$("accountButton"), $("topAccountButton")]) {
   button.addEventListener("click", () => {
     $("profileDisplayName").value = profile.name || displayName();
-    $("profilePhotoUrl").value = profile.photo || "";
-    $("profilePhotoPreview").textContent = profile.photo ? "" : initialsFor(displayName());
-    $("profilePhotoPreview").style.backgroundImage = safeImageUrl(profile.photo) ? `url("${safeImageUrl(profile.photo)}")` : "";
+    previewProfilePhoto(profile.photo);
     openDialog(dialogs.profile);
   });
 }
@@ -1530,11 +1530,44 @@ $("openAccountFromProfile").addEventListener("click", () => {
   openDialog(dialogs.account);
 });
 
-$("profilePhotoUrl").addEventListener("input", (event) => {
-  const value = safeImageUrl(event.target.value);
-  $("profilePhotoPreview").style.backgroundImage = value ? `url("${value}")` : "";
-  $("profilePhotoPreview").textContent = value ? "" : initialsFor($("profileDisplayName").value || displayName());
+function previewProfilePhoto(value) {
+  const photo = safeImageUrl(value);
+  $("profilePhotoUrl").value = photo;
+  $("profilePhotoPreview").style.backgroundImage = photo ? `url("${photo}")` : "";
+  $("profilePhotoPreview").textContent = photo ? "" : initialsFor($("profileDisplayName").value || displayName());
+  $("removeProfilePhoto").hidden = !photo;
+}
+
+async function photoFileToDataUrl(file) {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const crop = squareCrop(bitmap.width, bitmap.height);
+    const canvas = document.createElement("canvas");
+    canvas.width = crop.size;
+    canvas.height = crop.size;
+    canvas.getContext("2d").drawImage(bitmap, crop.sx, crop.sy, crop.side, crop.side, 0, 0, crop.size, crop.size);
+    return canvas.toDataURL("image/jpeg", 0.82);
+  } finally {
+    bitmap.close?.();
+  }
+}
+
+$("chooseProfilePhoto").addEventListener("click", () => $("profilePhotoFile").click());
+
+$("profilePhotoFile").addEventListener("change", async (event) => {
+  const [file] = event.target.files || [];
+  event.target.value = "";
+  if (!file) return;
+  try {
+    const dataUrl = await photoFileToDataUrl(file);
+    if (!isSafeImageDataUrl(dataUrl)) throw new Error("too large");
+    previewProfilePhoto(dataUrl);
+  } catch {
+    showToast("That photo couldn’t be read. Try a JPEG or PNG.");
+  }
 });
+
+$("removeProfilePhoto").addEventListener("click", () => previewProfilePhoto(""));
 
 $("profileForm").addEventListener("submit", async (event) => {
   event.preventDefault();
