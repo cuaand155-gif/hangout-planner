@@ -409,3 +409,21 @@ dialog.wide-dialog{width:min(560px,calc(100% - 32px))}
 .booking-feed-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .booking-note{font-style:italic}
 @media(max-width:620px){.picked-row{grid-template-columns:1fr 1fr}.picked-row input[type=date]{grid-column:1/-1}}
+/* ---------- Plans: time votes, RSVP, repeat ---------- */
+.time-option{display:inline-flex;align-items:center;border-radius:999px;background:var(--bg);overflow:hidden}
+.suggestions .time-option button{border-radius:0;background:transparent}
+.suggestions .time-option .time-vote{display:inline-flex;align-items:center;gap:4px;padding:7px 6px 7px 11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.suggestions .time-option .time-vote .icon{width:13px;height:13px}
+.time-option.voted .time-vote{color:var(--purple)}
+.suggestions .time-option button:hover{background:var(--lavender);color:var(--purple-dark)}
+.rsvp{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px dashed color-mix(in srgb,var(--purple) 20%,var(--surface))}
+.rsvp>span{font-size:10px;color:var(--faint)}
+.rsvp-buttons{display:inline-flex;gap:4px;background:var(--bg);border-radius:999px;padding:3px}
+.rsvp-buttons button{border:0;border-radius:999px;background:transparent;color:var(--ink);padding:6px 11px;font-size:10px;font-weight:600;transition:background-color .2s var(--ease),color .2s var(--ease)}
+.rsvp-buttons button:hover{color:var(--purple-dark)}
+.rsvp-buttons button.active{background:var(--purple);color:var(--on-accent,#fff)}
+.rsvp-buttons button[data-rsvp="no"].active{background:var(--muted)}
+.rsvp small{flex-basis:100%;font-size:10px;color:var(--muted)}
+.rsvp small:empty{display:none}
+.plan-idea{margin-top:10px;display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:0}
+.plan-idea .icon{width:12px;height:12px}

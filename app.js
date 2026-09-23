@@ -56,6 +56,7 @@ import {
 import { checklistSteps, showChecklist } from "./lib/checklist.js";
 import { APPEARANCES, THEME_COLORS, normalizeAppearance, resolveTheme } from "./lib/appearance.js";
 import { initBookingOwner } from "./booking-owner.js";
+import { REPEATS, applyRsvp, nextOccurrence, repeatLabel, rsvpAnswers, rsvpSummary, toggleTimeVote } from "./lib/hangout.js";
 
 // Browser-safe credentials: the publishable (anon) key is designed to ship in
 // client code. Row level security in supabase/schema.sql is what protects data.
@@ -770,6 +771,7 @@ function renderIdeas() {
           <h3>${escapeHtml(idea.title)}</h3>
           <p>${escapeHtml(idea.description)}</p>
           <div class="idea-meta"><span>⌖ ${escapeHtml(idea.location || "Anywhere")}</span><span>${svgIcon("heart")} ${count} vote${count === 1 ? "" : "s"}</span></div>
+          <button class="text-button plan-idea" type="button" data-plan-idea="${escapeAttribute(idea.id)}">Plan this ${svgIcon("arrow")}</button>
         </div>
       </article>`;
     })
@@ -787,19 +789,65 @@ function renderPlan() {
   $("tentativeTitle").textContent = plan.location ? `${plan.activity} · ${plan.location}` : plan.activity;
 
   const scope = planScopeLabel(plan);
-  $("tentativeTiming").textContent = plan.chosen
-    ? `Pencilled in for ${formatDayStamp(plan.chosen)} at ${formatClock(plan.chosen)} with ${plan.audience}`
-    : `${scope} with ${plan.audience}`;
-  $("tentativeBadge").textContent = plan.chosen ? "Pencilled in" : "Not confirmed";
+  const occurrence = nextOccurrence(plan);
+  const repeats = plan.repeat && plan.repeat !== "none" ? ` · ${repeatLabel(plan.repeat).toLowerCase()}` : "";
+  $("tentativeTiming").textContent = occurrence
+    ? `${repeats ? "Next up" : "Pencilled in for"} ${formatDayStamp(occurrence.start)} at ${formatClock(occurrence.start)} with ${plan.audience}${repeats}`
+    : `${scope} with ${plan.audience}${repeats}`;
+  $("tentativeBadge").textContent = plan.chosen ? (repeats ? "Repeating" : "Pencilled in") : "Not confirmed";
 
-  const suggestions = suggestionsForPlan(plan);
-  $("tentativeSuggestions").innerHTML = suggestions.length
-    ? `<span>Suggested windows</span>${suggestions
-        .map((window) => `<button type="button" data-window="${window.start.getTime()}" data-window-end="${window.end.getTime()}">${escapeHtml(formatWindow(window))}</button>`)
+  const options = timeOptionsForPlan(plan);
+  $("tentativeSuggestions").innerHTML = options.length
+    ? `<span>${plan.chosen ? "Other times" : "Vote on a time, then pick one"}</span>${options
+        .map((option) => {
+          const mine = option.voters.includes(memberId);
+          const names = option.voters.map((id) => session.state.members.find((member) => member.id === id)?.name).filter(Boolean);
+          return `<span class="time-option${mine ? " voted" : ""}">` +
+            `<button type="button" class="time-vote" data-vote-time="${option.start.toISOString()}" aria-pressed="${mine}" title="${escapeAttribute(names.length ? `Votes: ${names.join(", ")}` : "No votes yet")}" aria-label="${mine ? "Remove your vote for" : "Vote for"} ${escapeAttribute(formatWindow(option))}">${svgIcon(mine ? "heart-fill" : "heart")} ${option.voters.length}</button>` +
+            `<button type="button" data-window="${option.start.getTime()}" data-window-end="${option.end.getTime()}" title="Pick this time">${escapeHtml(formatWindow(option))}</button></span>`;
+        })
         .join("")}`
     : '<span>No shared window in that range yet — add more times or widen the search.</span>';
 
+  renderRsvp(plan, occurrence);
   renderCalendarAdd(plan);
+}
+
+/** Suggested windows plus any time someone has voted for, most votes first. */
+function timeOptionsForPlan(plan) {
+  const now = new Date();
+  const length = settings().minWindowHours * 3600 * 1000;
+  const votes = plan.timeVotes || {};
+  const byStart = new Map(suggestionsForPlan(plan).map((window) => [window.start.toISOString(), { start: window.start, end: window.end }]));
+  for (const key of Object.keys(votes)) {
+    if (!byStart.has(key)) byStart.set(key, { start: new Date(key), end: new Date(new Date(key).getTime() + length) });
+  }
+  const chosen = plan.chosen ? new Date(plan.chosen).toISOString() : null;
+  return [...byStart.entries()]
+    .filter(([key, option]) => key !== chosen && option.end > now)
+    .map(([key, option]) => ({ ...option, voters: votes[key] || [] }))
+    .sort((a, b) => b.voters.length - a.voters.length || a.start - b.start)
+    .slice(0, 5);
+}
+
+function renderRsvp(plan, occurrence) {
+  const row = $("rsvpRow");
+  row.hidden = !occurrence;
+  if (!occurrence) return;
+  const mine = rsvpAnswers(plan, occurrence)[memberId];
+  for (const button of row.querySelectorAll("[data-rsvp]")) {
+    const active = button.dataset.rsvp === mine;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+  const groups = rsvpSummary(plan, occurrence, session.state.members);
+  const names = (list) => list.map((member) => member.name).join(", ");
+  $("rsvpSummary").textContent = [
+    groups.yes.length ? `Going: ${names(groups.yes)}` : "",
+    groups.maybe.length ? `Maybe: ${names(groups.maybe)}` : "",
+    groups.no.length ? `Can’t: ${names(groups.no)}` : "",
+    groups.waiting.length ? `${groups.waiting.length} haven’t answered` : "",
+  ].filter(Boolean).join(" · ");
 }
 
 /* Add to calendar */
@@ -810,7 +858,7 @@ function addedRecords() {
 
 /** The key names this plan at this exact time, so moving it re-enables adding. */
 function addedKey(plan) {
-  return `${planUid(plan, session.slug)}|${plan.chosen}|${plan.chosenEnd || ""}`;
+  return `${planUid(plan, session.slug)}|${plan.chosen}|${plan.chosenEnd || ""}|${plan.repeat || "none"}`;
 }
 
 function renderCalendarAdd(plan) {
@@ -2040,6 +2088,7 @@ function openPlanDialog() {
   $("planStart").value = plan?.start || "";
   $("planEnd").value = plan?.end || "";
   $("dateRangeFields").hidden = plan?.timing !== "range";
+  $("planRepeat").innerHTML = REPEATS.map((entry) => `<option value="${entry.key}"${(plan?.repeat || "none") === entry.key ? " selected" : ""}>${entry.label}</option>`).join("");
   openDialog(dialogs.plan);
 }
 
@@ -2068,8 +2117,16 @@ $("tentativePlanForm").addEventListener("submit", async (event) => {
     timing: String(form.get("timing") || "week"),
     start: String(form.get("start") || ""),
     end: String(form.get("end") || ""),
+    repeat: String(form.get("repeat") || "none"),
     updatedAt: new Date().toISOString(),
   };
+  // Editing the plan keeps the picked time, votes and RSVPs.
+  const previous = session.state.plan;
+  if (previous) {
+    for (const key of ["chosen", "chosenEnd", "timeZone", "timeVotes", "rsvp"]) {
+      if (previous[key] !== undefined) plan[key] = previous[key];
+    }
+  }
   if (plan.timing === "range" && plan.start && plan.end && plan.end < plan.start) {
     showToast("The end of the range comes before the start.");
     return;
@@ -2081,6 +2138,20 @@ $("tentativePlanForm").addEventListener("submit", async (event) => {
   showToast("Tentative plan saved — suggested windows are below.");
 });
 
+$("rsvpRow").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-rsvp]");
+  if (!button) return;
+  const answer = button.dataset.rsvp;
+  let result = null;
+  await mutate((draft) => {
+    const occurrence = draft.plan && nextOccurrence(draft.plan);
+    if (!occurrence) return;
+    draft.plan.rsvp = applyRsvp(draft.plan, occurrence, memberId, answer);
+    result = draft.plan.rsvp.answers[memberId] || null;
+  });
+  showToast(result === "yes" ? "You’re going." : result === "maybe" ? "Marked as maybe." : result === "no" ? "Got it — you can’t make it." : "Answer cleared.");
+});
+
 $("removeTentativePlan").addEventListener("click", async () => {
   await mutate((draft) => {
     draft.plan = null;
@@ -2089,6 +2160,17 @@ $("removeTentativePlan").addEventListener("click", async () => {
 });
 
 $("tentativeSuggestions").addEventListener("click", async (event) => {
+  const vote = event.target.closest("[data-vote-time]");
+  if (vote) {
+    const key = vote.dataset.voteTime;
+    const adding = !(session.state.plan?.timeVotes?.[key] || []).includes(memberId);
+    await mutate((draft) => {
+      if (!draft.plan) return;
+      draft.plan.timeVotes = toggleTimeVote(draft.plan.timeVotes, key, memberId);
+    });
+    showToast(adding ? "Vote added." : "Vote removed.");
+    return;
+  }
   const button = event.target.closest("[data-window]");
   if (!button) return;
   const chosen = new Date(Number(button.dataset.window));
@@ -2103,6 +2185,7 @@ $("tentativeSuggestions").addEventListener("click", async (event) => {
     draft.plan.id = draft.plan.id || createId("plan");
     draft.plan.chosen = chosen.toISOString();
     draft.plan.chosenEnd = chosenEnd.toISOString();
+    draft.plan.timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     draft.plan.updatedAt = new Date().toISOString();
   }, { note: `Pencilled in for ${formatDayStamp(chosen)} at ${formatClock(chosen)}` });
   showToast(`Pencilled in for ${formatDayStamp(chosen)} at ${formatClock(chosen)}.`);
@@ -2580,6 +2663,15 @@ $("ideaGrid").addEventListener("click", async (event) => {
   const edit = event.target.closest("[data-edit-idea]");
   if (edit) {
     openIdeaDialog(session.state.ideas.find((idea) => idea.id === edit.dataset.editIdea));
+    return;
+  }
+  const planIdea = event.target.closest("[data-plan-idea]");
+  if (planIdea) {
+    const idea = session.state.ideas.find((entry) => entry.id === planIdea.dataset.planIdea);
+    if (!idea) return;
+    openPlanDialog();
+    $("planActivity").value = idea.title;
+    $("planLocation").value = idea.location || "";
     return;
   }
   const vote = event.target.closest("[data-vote-idea]");

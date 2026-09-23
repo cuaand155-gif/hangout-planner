@@ -18,7 +18,7 @@ test("UTC stamps use the compact calendar form", () => {
 });
 
 test("text escaping covers the RFC 5545 specials", () => {
-  assert.equal(escapeIcsText("a,b;c\\d\ne"), "a\\,b\;c\\\\d\\ne");
+  assert.equal(escapeIcsText("a,b;c\\d\ne"), "a\\,b\\;c\\\\d\\ne");
   assert.equal(escapeIcsText(null), "");
 });
 
@@ -55,7 +55,7 @@ test("the .ics file is valid, round-trips through our own parser, and carries th
   assert.ok(ics.startsWith("BEGIN:VCALENDAR\r\n"));
   assert.ok(ics.endsWith("END:VCALENDAR\r\n"));
   assert.match(ics, /UID:plan_abc\.crew-7fq2x@gatherly/);
-  assert.match(ics, /SUMMARY:Dinner\\, then games · Luma\; Queen West/);
+  assert.match(ics, /SUMMARY:Dinner\\, then games · Luma\\; Queen West/);
   assert.match(ics, /STATUS:TENTATIVE/);
 
   const blocks = parseIcs(ics, { from: "2026-09-20T00:00:00Z", to: "2026-10-01T00:00:00Z", includeTitles: true });

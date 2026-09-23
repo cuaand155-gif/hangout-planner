@@ -107,6 +107,15 @@
                 <h3 id="tentativeTitle"></h3>
                 <p id="tentativeTiming"></p>
                 <div class="suggestions" id="tentativeSuggestions"></div>
+                <div class="rsvp" id="rsvpRow" hidden>
+                  <span>Are you in?</span>
+                  <div class="rsvp-buttons" role="group" aria-label="Your answer">
+                    <button type="button" data-rsvp="yes">Going</button>
+                    <button type="button" data-rsvp="maybe">Maybe</button>
+                    <button type="button" data-rsvp="no">Can’t make it</button>
+                  </div>
+                  <small id="rsvpSummary"></small>
+                </div>
                 <div class="calendar-add" id="calendarAdd" hidden>
                   <span>Add to your calendar</span>
                   <a class="calendar-add-button" id="addToGoogle" href="#" target="_blank" rel="noopener">Google Calendar</a>
@@ -272,6 +281,9 @@
           <div><label class="field-label" for="planStart">From</label><input class="text-input" type="date" id="planStart" name="start" /></div>
           <div><label class="field-label" for="planEnd">To</label><input class="text-input" type="date" id="planEnd" name="end" /></div>
         </div>
+        <label class="field-label" for="planRepeat">Repeat</label>
+        <select class="text-input" id="planRepeat" name="repeat"></select>
+        <p class="form-hint">Once a time is picked, a repeating plan rolls on to the next date by itself, and each date gets its own RSVPs.</p>
         <button class="primary-button full" type="submit">Save tentative plan</button>
       </form>
     </dialog>
