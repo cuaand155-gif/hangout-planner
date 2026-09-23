@@ -36,6 +36,7 @@ import { buildPlanIcs, googleCalendarUrl, planUid } from "./lib/calendar-export.
 import { forgetGroup, mergeGroups, newGroupSlug, rememberGroup } from "./lib/groups.js";
 import { dueForSync, sameBusy } from "./lib/sync.js";
 import { isSafeImageDataUrl, squareCrop } from "./lib/avatar.js";
+import { PALETTES, normalizePalette } from "./lib/palettes.js";
 
 // Browser-safe credentials: the publishable (anon) key is designed to ship in
 // client code. Row level security in supabase/schema.sql is what protects data.
@@ -59,6 +60,7 @@ const STORAGE = {
   groups: "gatherly-groups",
   added: "gatherly-calendar-added",
   pendingName: (slug) => `gatherly-new-group:${slug}`,
+  palette: "gatherly-palette",
 };
 
 const supabaseClient = AUTH_CONFIG.configured && window.supabase
@@ -2146,6 +2148,36 @@ $("ideaGrid").addEventListener("click", async (event) => {
 
 const hourOptions = (selected) =>
   Array.from({ length: 25 }, (_, hour) => `<option value="${hour}"${hour === selected ? " selected" : ""}>${hour === 24 ? "Midnight" : formatHour(hour)}</option>`).join("");
+
+/* Colour palette (per device) */
+
+function currentPalette() {
+  try {
+    return normalizePalette(window.localStorage.getItem(STORAGE.palette));
+  } catch {
+    return normalizePalette(null);
+  }
+}
+
+function applyPalette(id) {
+  const palette = normalizePalette(id);
+  document.documentElement.dataset.palette = palette;
+  try {
+    window.localStorage.setItem(STORAGE.palette, palette);
+  } catch {
+    /* Private mode: the choice lasts for this visit only. */
+  }
+  for (const swatch of $("palettePicker").children) swatch.setAttribute("aria-checked", String(swatch.dataset.palette === palette));
+}
+
+$("palettePicker").innerHTML = PALETTES.map(
+  (palette) => `<button type="button" class="palette-swatch" role="radio" aria-checked="false" data-palette="${palette.id}"><i style="background:${palette.color}"></i>${escapeHtml(palette.name)}</button>`
+).join("");
+$("palettePicker").addEventListener("click", (event) => {
+  const swatch = event.target.closest("[data-palette]");
+  if (swatch) applyPalette(swatch.dataset.palette);
+});
+applyPalette(currentPalette());
 
 $("settingsButton").addEventListener("click", () => {
   const config = settings();

@@ -3,14 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f7f8fc" />
+    <meta name="theme-color" content="#f4eee6" />
     <meta name="description" content="Gatherly finds the time everyone is free, then helps your group pick something worth doing." />
     <link rel="icon" href="data:," />
     <title>Gatherly — Make time for each other</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:ital,opsz,wght@0,9..144,500..700;1,9..144,500..700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="styles.css" />
+    <script>try{var p=localStorage.getItem("gatherly-palette");if(p)document.documentElement.dataset.palette=p}catch(e){}</script>
   </head>
   <body>
     <div class="app-shell">
@@ -326,6 +327,9 @@
 
     <dialog id="settingsDialog">
       <div class="dialog-header"><div><p class="eyebrow">SETTINGS</p><h2>How this planner works.</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <p class="field-label" id="paletteLabel">Colour</p>
+      <div class="palette-picker" id="palettePicker" role="radiogroup" aria-labelledby="paletteLabel"></div>
+      <p class="form-hint">Just for you, on this device.</p>
       <form id="settingsForm">
         <label class="field-label" for="settingWorkspaceName">Group name</label>
         <input class="text-input" id="settingWorkspaceName" maxlength="60" required />
