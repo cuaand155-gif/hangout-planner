@@ -143,7 +143,7 @@ const MESSAGES = {
   "too-large": "That calendar feed is too big to import.",
 };
 
-export default async function handler(request, response) {
+async function handle(request, response) {
   if (request.method === "OPTIONS") {
     response.setHeader("Allow", "POST, OPTIONS");
     return send(response, 204, {});
@@ -204,4 +204,15 @@ export default async function handler(request, response) {
     count: blocks.length,
     truncated: blocks.length > MAX_BLOCKS,
   });
+}
+
+/** Same guarantee as the workspace handler: never crash the function. */
+export default async function handler(request, response) {
+  try {
+    return await handle(request, response);
+  } catch (error) {
+    console.error("calendar handler failed:", error);
+    if (response.headersSent) return undefined;
+    return send(response, 502, { error: "Could not read that calendar link.", detail: error?.name || "Error" });
+  }
 }
