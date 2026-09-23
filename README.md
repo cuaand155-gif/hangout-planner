@@ -13,7 +13,7 @@ No build step, no frontend framework, no npm dependencies.
 
 ```bash
 npm run dev          # http://localhost:4173
-npm test             # 116 unit and API tests, no dependencies
+npm test             # 130 unit and API tests, no dependencies
 ```
 
 `npm run dev` serves the static files *and* the `/api` handlers, so the app
@@ -32,11 +32,13 @@ runs in demo mode: a sample workspace, with your changes kept in this browser.
 | `lib/friends.js` | Friend requests: what belongs in each list, and the database calls. |
 | `lib/calendar-export.js` | Turns a pencilled-in plan into an `.ics` file or a Google Calendar link. |
 | `lib/groups.js` | The "Your groups" list, and unguessable links for new groups. |
+| `lib/sharing.js` | Who sees what of your calendar: levels, picked events, and the filtered copies friends get. |
 | `lib/sync.js` | When a saved calendar is due for a refresh, and whether a refresh changed anything. |
 | `api/groups.js` | Lists a signed-in person's groups, so the list follows them between devices. |
 | `api/workspace.js` | Loads and saves the shared workspace, with validation and conflict detection. |
 | `api/calendar.js` | Fetches a calendar feed server-side, with the guards an inbound URL needs. |
 | `supabase/schema.sql` | `workspaces`, plus `profiles` and `friend_requests` for people who sign in. |
+| `supabase/rls-shares-test.sql` | Proves only you can write your calendar shares and only that friend can read them. |
 | `supabase/rls-test.sql` | Proves the friend-request policies hold; runs in a transaction and rolls back. |
 
 ### Availability
@@ -95,6 +97,32 @@ the end, so nobody can find your group by guessing its name.
   a duplicate. The event lasts as long as the group's "shortest window"
   setting (2 hours by default), within the free stretch.
 
+### Your calendar and who sees what
+
+**My calendar** shows your own week with every event name, from all the
+calendars you've connected. Only you see it: the names are kept in this
+browser and never uploaded as they are.
+
+**Who sees what** decides what leaves, per audience:
+
+| Level | What they get |
+| --- | --- |
+| Nothing | Can't open your calendar at all |
+| Busy / free only | When you're busy, never what |
+| Only events I pick | Names of the events you tapped in My calendar; the rest read "Busy" |
+| Everything | Every event name |
+
+- **Friends** get a default level, and any friend can be set differently.
+  Each friend receives their own filtered copy (`calendar_shares`, one row per
+  friend), which row level security lets only them read. Open a friend's
+  calendar from Manage people → Friends → Calendar.
+- **Groups** get one level for all of them — busy, picked or everything — and
+  a group must also allow event details under Privacy before any name reaches
+  it, because everyone holding a group's link can read it. Inside a group you
+  always show as busy when you are, since that's how the group finds a time.
+- **Preview as** shows your week exactly as a given friend or group sees it.
+- Picking works by name: pick "Soccer" once and every Soccer event is shared.
+
 ### Sharing and privacy
 
 - A workspace lives at `/?w=<slug>`. Anyone with the link can open it, add their
@@ -103,8 +131,9 @@ the end, so nobody can find your group by guessing its name.
   signed in, after which the API rejects writes that don't carry a member's token.
 - Calendar links are kept in your browser's local storage and never uploaded.
   Only the resulting busy blocks are shared with the group.
-- Event titles are stripped unless the group turns on **Show event details**.
-  Switching back removes titles that were already imported.
+- Event titles are stripped unless the group turns on **Show event details**,
+  and even then only the ones each person allows. Switching back removes
+  titles that were already imported.
 
 ### Saving
 
@@ -128,6 +157,11 @@ everything else works without it.
 See [DEPLOY.md](DEPLOY.md) for hosting, database and Google sign-in setup.
 
 ## Known limitations
+
+- Who-sees-what choices are kept on the device you set them on. Friends'
+  copies refresh from whichever device last synced your calendar.
+- Friends see events from your connected calendars. Times you paint by hand
+  stay inside that group.
 
 - Google Calendar's direct connection lasts about an hour after signing in,
   because Supabase hands over Google's token only once. For hands-free syncing

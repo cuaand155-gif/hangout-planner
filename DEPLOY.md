@@ -65,6 +65,10 @@ configuration — just the `friend_requests` table, which is in
 `supabase/schema.sql` from step 1. If you ran an earlier version of the schema,
 run it again; every statement is safe to repeat.
 
+Calendar sharing between friends uses the `calendar_shares` table from the same
+file. [`supabase/rls-shares-test.sql`](supabase/rls-shares-test.sql) checks its
+policies the same way.
+
 To confirm the policies are doing their job, run
 [`supabase/rls-test.sql`](supabase/rls-test.sql) in the SQL editor. It creates
 throwaway accounts inside a transaction, tries every way one account might

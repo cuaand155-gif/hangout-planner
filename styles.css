@@ -172,6 +172,55 @@ dialog[open]{animation:gatherly-dialog .32s var(--ease)}
 .palette-swatch:active{transform:scale(.96)}
 .hero-actions button{white-space:nowrap}.hero>div:first-child{min-width:0}
 
+/* My calendar — your own events, with per-event name sharing. */
+.mycal-section{margin-bottom:55px}
+.mycal-card{background:var(--surface);border:1px solid var(--line);border-radius:13px;box-shadow:var(--shadow);padding:18px 20px 20px}
+.mycal-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:space-between}
+.preview-label{display:flex;align-items:center;gap:9px;font-size:11px;font-weight:700;color:var(--muted)}
+.preview-label .text-input{width:auto;min-width:200px;padding:8px 34px 8px 11px;font-size:12px}
+.mycal-summary{margin:14px 0 12px;color:var(--muted);font-size:12px;line-height:1.5}
+.mycal-summary:empty{display:none}
+.agenda{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
+.agenda-day{border:1px solid var(--line);border-radius:10px;padding:10px 8px;min-height:140px;background:var(--surface)}
+.agenda-day.today{border-color:color-mix(in srgb,var(--purple) 45%,var(--surface))}
+.agenda-date{display:flex;align-items:baseline;gap:6px;margin:0 2px 8px}
+.agenda-date small{font-size:9px;letter-spacing:1px;color:var(--faint,#b0a7a0);font-weight:700}
+.agenda-date strong{font:700 17px "Fraunces",Georgia,serif}
+.agenda-day.today .agenda-date strong{color:var(--purple)}
+.agenda-day ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.agenda-event{display:block;width:100%;text-align:left;border-radius:8px;padding:7px 8px;background:color-mix(in srgb,var(--purple) 9%,var(--surface));border:1px solid transparent;font-size:11px;line-height:1.35;transition:border-color .15s,background .15s}
+button.agenda-event:hover{border-color:color-mix(in srgb,var(--purple) 40%,var(--surface))}
+.agenda-event strong{display:block;font-weight:700;overflow-wrap:anywhere}
+.agenda-time{display:block;font-size:10px;color:var(--muted);margin-bottom:2px}
+.agenda-event.is-busy{background:var(--busy,#f4f2f0);color:var(--muted)}
+.pick-state{display:inline-block;margin-top:5px;font-size:9px;font-weight:700;letter-spacing:.4px;color:var(--muted)}
+.agenda-event.is-picked{border-color:var(--purple)}
+.agenda-event.is-picked .pick-state{color:var(--purple)}
+.agenda-event.is-picked .pick-state:before{content:"👁 "}
+.agenda-empty{font-size:11px;color:var(--faint,#b6ada6);padding:4px 2px}
+.agenda-blank{border:1px dashed var(--dash,#e4dfdb);border-radius:11px;padding:26px;text-align:center;color:var(--muted)}
+.agenda-blank strong{display:block;color:var(--ink);font-size:14px}
+.agenda-blank p{margin:8px auto 14px;max-width:420px;font-size:12px;line-height:1.5}
+.share-friend-list{display:grid;gap:7px}
+.share-friend-row{display:flex;align-items:center;gap:10px;font-size:12px;font-weight:700}
+.share-friend-row span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.share-friend-row .text-input{width:auto;max-width:60%;padding:8px 34px 8px 10px;font-size:11px}
+.share-picked-list{display:flex;flex-wrap:wrap;gap:6px}
+.share-picked-chip{border:1px solid color-mix(in srgb,var(--purple) 35%,var(--surface));background:color-mix(in srgb,var(--purple) 6%,var(--surface));color:var(--purple);border-radius:20px;padding:5px 10px;font-size:11px;font-weight:700}
+.share-picked-chip span{margin-left:3px;opacity:.7}
+dialog.wide-dialog{width:min(860px,calc(100% - 32px))}
+.friend-week{margin:14px 0}
+.friend-week small{margin-left:auto;color:var(--muted);font-size:10px}
+.compact-agenda .agenda-day{min-height:90px}
+@media(max-width:900px){
+  .agenda{grid-template-columns:1fr}
+  .agenda-day{min-height:0;display:grid;grid-template-columns:54px 1fr;gap:8px;align-items:start}
+  .agenda-date{flex-direction:column;gap:0;margin:2px 0 0}
+  .mycal-section .section-heading{flex-direction:column;align-items:flex-start;gap:12px}
+  .preview-label{width:100%}
+  .preview-label .text-input{flex:1;min-width:0}
+  .mycal-toolbar .outline-button{width:100%}
+}
 /* Icons (Phosphor Light sprite in index.html) */
 .icon{width:1.15em;height:1.15em;fill:currentColor;flex:none;display:inline-block;vertical-align:-.2em}
 .nav-icon{display:inline-grid;place-items:center}.nav-icon .icon{width:19px;height:19px}
