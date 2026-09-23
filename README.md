@@ -1,8 +1,8 @@
-# Gatherly
+# Waddle 🐧
 
 Find the time everyone is actually free, then fill it with something worth doing.
 
-Gatherly is a small, dependency-free web app. A group shares one link; each
+Waddle is a small, dependency-free web app. A group shares one link; each
 person marks when they're busy — by hand or by importing a calendar — and the
 planner shows the windows where everybody is free, ranked longest first. The
 group collects ideas and votes on them in the same place.
@@ -13,7 +13,7 @@ No build step, no frontend framework, no npm dependencies.
 
 ```bash
 npm run dev          # http://localhost:4173
-npm test             # 107 unit and API tests, no dependencies
+npm test             # 116 unit and API tests, no dependencies
 ```
 
 `npm run dev` serves the static files *and* the `/api` handlers, so the app
@@ -68,7 +68,7 @@ There are three ways, and none of them can put the same person in a group twice:
   stays available for the next group without re-inviting.
 
 If a friend you add is already in the group under a name somebody typed by
-hand, Gatherly offers to **link** that row to their account instead of adding
+hand, Waddle offers to **link** that row to their account instead of adding
 a duplicate. The rules for all of this live in `lib/membership.js` and are
 covered by tests.
 
@@ -85,7 +85,7 @@ the end, so nobody can find your group by guessing its name.
 - **Reading busy times.** Paste any calendar's `.ics` address under Calendar
   links — for Google, that's Settings → your calendar → *Secret address in
   iCal format*. Saved links refresh by themselves every time you open
-  Gatherly, or come back to the tab, if the last refresh is over 30 minutes
+  Waddle, or come back to the tab, if the last refresh is over 30 minutes
   old. A refresh that finds nothing new saves nothing.
 - **Adding the plan to your calendar.** Once a plan is pencilled in, the plan
   card offers **Google Calendar** and **Apple / Outlook**. The Apple/Outlook
@@ -132,16 +132,17 @@ See [DEPLOY.md](DEPLOY.md) for hosting, database and Google sign-in setup.
 - Google Calendar's direct connection lasts about an hour after signing in,
   because Supabase hands over Google's token only once. For hands-free syncing
   use the calendar's secret iCal address instead, which refreshes indefinitely.
-- Refreshing happens while Gatherly is open. Nothing syncs in the background
+- Refreshing happens while Waddle is open. Nothing syncs in the background
   while it's closed — that would mean the server holding everyone's calendar
   access long-term.
-- Calendar entries carrying a timezone are read in *your* timezone. If your
-  calendar is in a different timezone from the person reading it, those times
-  will be off.
+- Calendar entries are converted from the timezone they were written in,
+  including Outlook's Windows zone names. Entries with no timezone at all
+  ("floating" times) and zones the server doesn't recognise are read in the
+  viewer's own timezone.
 - Everyone in one workspace shares one grid of hours and one week layout
   (Settings), and all times are displayed in each viewer's own timezone.
 - A friend request notifies nobody by email — it waits in the app until the
   recipient signs in. Tell them it's there, or just send the invite link.
-- Friend requests notify nobody by email, as above. Everything else about them
-  has been run against the live database: `supabase/rls-test.sql` checks the
-  policies hold, and the app flows are covered by browser tests.
+  Everything else about them has been run against the live database:
+  `supabase/rls-test.sql` checks the policies hold, and the app flows are
+  covered by browser tests.

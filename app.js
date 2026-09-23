@@ -54,6 +54,7 @@ const AUTH_CONFIG = {
 const GOOGLE_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
 const SYNC_WEEKS = 4;
 const STORAGE = {
+  // Keys keep the app's old name so data saved before the rename still loads.
   cache: (slug) => `gatherly-workspace:${slug}`,
   member: "gatherly-member-id",
   profile: "gatherly-profile",
@@ -440,7 +441,7 @@ function render() {
 
 function renderChrome() {
   $("workspaceName").textContent = session.state.name;
-  document.title = `${session.state.name} — Gatherly`;
+  document.title = `${session.state.name} — Waddle`;
   $("todayStamp").textContent = formatDayStamp(new Date()).toUpperCase();
   $("syncState").textContent = ui.saving ? "SAVING" : session.persisted ? "LIVE" : session.offline ? "OFFLINE" : "DEMO";
   $("privacyStatus").textContent = session.state.privacy === "details" ? "Event details shared" : "Busy / free only";
@@ -2146,7 +2147,7 @@ $("friendRequestForm").addEventListener("submit", async (event) => {
   const { error } = await friendStore.send({
     requesterId: ui.user.id,
     email: field.value,
-    note: `${displayName()} wants to plan with you on Gatherly.`,
+    note: `${displayName()} wants to plan with you on Waddle.`,
   });
   friends.busy = false;
   button.disabled = false;
@@ -2610,7 +2611,7 @@ $("exportWorkspace").addEventListener("click", () => {
   const blob = new Blob([JSON.stringify({ slug: session.slug, ...session.state }, null, 2)], { type: "application/json" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
-  link.download = `${session.slug}-gatherly.json`;
+  link.download = `${session.slug}-waddle.json`;
   link.click();
   URL.revokeObjectURL(link.href);
   showToast("Workspace exported.");

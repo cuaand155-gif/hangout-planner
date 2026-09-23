@@ -1,4 +1,4 @@
--- Gatherly database schema.
+-- Waddle database schema.
 --
 -- Run this once in the Supabase SQL editor (paste the contents of this file,
 -- not its path). Re-running it is safe: every statement is idempotent.
