@@ -3,7 +3,7 @@
 //   GET  /api/book?handle=alexi-7fq2x      -> { page, slots: [{ start, end }] }
 //   GET  /api/book?booking=<cancel token>  -> { booking } (for the cancel screen)
 //   GET  /api/book?feed=<feed token>       -> text/calendar of the owner's bookings
-//   POST /api/book { action: "book", handle, start, name, email, note }
+//   POST /api/book { action: "book", handle, start, name, email, note } -> { booking, page }
 //   POST /api/book { action: "cancel", token }
 //
 // Visitors never sign in and never see why a time is unavailable: busy blocks
@@ -16,7 +16,6 @@ import { config, restHeaders, send } from "./_supabase.js";
 import { fetchFeed, normalizeFeedUrl } from "./calendar.js";
 import { parseIcs } from "../lib/ics.js";
 import {
-  buildGuestIcs,
   buildOwnerFeed,
   busyFromIcsBlocks,
   normalizeBookingSettings,
@@ -160,9 +159,8 @@ async function book(db, payload, response, now) {
 
   const booking = inserted.body[0];
   return send(response, 201, {
-    booking: { start: booking.start_at, end: booking.end_at, status: booking.status, cancelToken: booking.cancel_token },
+    booking: { id: booking.id, start: booking.start_at, end: booking.end_at, status: booking.status, createdAt: booking.created_at, cancelToken: booking.cancel_token },
     page: publicPage(page, settings),
-    ics: buildGuestIcs(booking, { ownerName: page.owner_name, pageTitle: page.title }),
   });
 }
 

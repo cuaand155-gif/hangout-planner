@@ -30,6 +30,7 @@ const ROUTES = {
   "/api/workspace": () => import("../api/workspace.js"),
   "/api/calendar": () => import("../api/calendar.js"),
   "/api/groups": () => import("../api/groups.js"),
+  "/api/book": () => import("../api/book.js"),
 };
 
 /** Mimics the response helpers the handlers rely on (status/json/setHeader). */
@@ -120,7 +121,8 @@ const server = createServer(async (request, response) => {
     return;
   }
 
-  await serveStatic(url.pathname, response);
+  // Mirrors the vercel.json rewrite for booking links.
+  await serveStatic(/^\/book\/[^/]+$/.test(url.pathname) ? "/book.html" : url.pathname, response);
 });
 
 server.listen(PORT, () => {
