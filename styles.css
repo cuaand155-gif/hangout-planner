@@ -218,3 +218,51 @@ dialog[open]{animation:gatherly-dialog .32s var(--ease)}
 .selected-window{flex-wrap:wrap}.selected-window .primary-button{margin-left:0;width:100%}
 .slot-detail,.edit-hint{padding-left:14px;padding-right:14px}
 }
+
+/* Get started checklist — shown to a new group until it is named, has times and has three people. */
+.checklist-card{background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);padding:22px 24px 20px;margin:-12px 0 16px}
+.checklist-head{display:flex;align-items:flex-start;gap:12px}
+.checklist-head>div{flex:1;min-width:0}
+.checklist-head .eyebrow{margin:0 0 7px}
+.checklist-head h2{font:600 24px/1.1 "Fraunces",Georgia,serif;letter-spacing:-.03em;margin:0;text-wrap:balance}
+.checklist-count{align-self:center;flex:none;background:var(--bg);color:var(--muted);border-radius:999px;padding:6px 12px;font-size:12px;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}
+.checklist-dismiss{align-self:center;flex:none;width:34px;height:34px;margin-right:-8px;border-radius:50%;display:grid;place-items:center;background:none;color:var(--faint);transition:transform .3s var(--ease)}
+.checklist-dismiss:hover{background:var(--bg);color:var(--ink)}
+.checklist-dismiss:active{transform:scale(.9)}
+.checklist-dismiss .icon{width:16px;height:16px}
+.checklist-meter{height:4px;margin:16px 0 14px;border-radius:999px;background:var(--bg);overflow:hidden}
+.checklist-meter i{display:block;height:100%;border-radius:inherit;background:var(--purple);transform:scaleX(0);transform-origin:left;transition:transform .7s var(--ease)}
+.checklist-steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.checklist-step{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;align-items:start;background:var(--bg);border-radius:18px;padding:14px 15px}
+.checklist-mark{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--surface);box-shadow:inset 0 0 0 1.5px var(--line);color:var(--muted);font:600 14px/1 "Fraunces",Georgia,serif}
+.checklist-mark .icon{width:15px;height:15px}
+.checklist-step.is-done .checklist-mark{background:var(--lavender);box-shadow:none;color:var(--purple)}
+.checklist-text{padding-top:5px}
+.checklist-text strong{display:block;font-size:14px;font-weight:600;color:var(--ink)}
+.checklist-text small{display:block;margin-top:3px;font-size:12px;line-height:1.45;color:var(--muted);text-wrap:pretty;overflow-wrap:anywhere}
+.checklist-step.is-done .checklist-text strong{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--faint);text-decoration-thickness:1px}
+.checklist-step button{grid-column:2;justify-self:start}
+.checklist-step .text-button{margin-left:0;padding:6px 0}
+.checklist-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+@keyframes checklist-pop{from{opacity:0;transform:scale(.5)}}
+@keyframes checklist-leave{to{opacity:0;transform:translateY(-8px) scale(.985)}}
+@media(prefers-reduced-motion:no-preference){
+.checklist-step.just-done .checklist-mark{animation:checklist-pop .5s var(--ease)}
+.content-wrap>.checklist-card.is-leaving{animation:checklist-leave .24s var(--ease) forwards}
+}
+@media(max-width:900px){
+.checklist-steps{grid-template-columns:1fr;gap:8px}
+.checklist-step{grid-template-columns:auto minmax(0,1fr) auto;align-items:center;padding:12px 14px}
+.checklist-text{padding-top:0}
+.checklist-step button{grid-column:3;grid-row:1}
+}
+@media(max-width:620px){
+.checklist-card{margin:-6px 0 14px;padding:18px 16px 16px}
+.checklist-head{flex-wrap:wrap;row-gap:10px}
+.checklist-head>div{flex-basis:calc(100% - 46px)}
+.checklist-dismiss{align-self:flex-start;margin-top:-6px}
+.checklist-count{order:3}
+.checklist-head h2{font-size:22px}
+.checklist-step{gap:10px;padding:12px}
+.checklist-step .outline-button{padding:9px 12px}
+}

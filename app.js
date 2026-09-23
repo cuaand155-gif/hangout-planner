@@ -37,6 +37,7 @@ import { forgetGroup, mergeGroups, newGroupSlug, rememberGroup } from "./lib/gro
 import { dueForSync, sameBusy } from "./lib/sync.js";
 import { isSafeImageDataUrl, squareCrop } from "./lib/avatar.js";
 import { PALETTES, normalizePalette } from "./lib/palettes.js";
+import { checklistSteps, showChecklist } from "./lib/checklist.js";
 
 // Browser-safe credentials: the publishable (anon) key is designed to ship in
 // client code. Row level security in supabase/schema.sql is what protects data.
@@ -61,6 +62,7 @@ const STORAGE = {
   added: "gatherly-calendar-added",
   pendingName: (slug) => `gatherly-new-group:${slug}`,
   palette: "gatherly-palette",
+  checklistDismissed: (slug) => `gatherly-checklist-dismissed:${slug}`,
 };
 
 const supabaseClient = AUTH_CONFIG.configured && window.supabase
@@ -111,6 +113,7 @@ const ui = {
   editingIdeaId: null,
   saving: false,
   user: null,
+  workspaceLoaded: false,
 };
 
 let profile = {
@@ -215,6 +218,7 @@ async function loadWorkspace() {
     session.offline = true;
     session.persisted = false;
   }
+  ui.workspaceLoaded = true;
   await ensureMembership();
   render();
   if (!session.persisted) noteDemoMode();
@@ -398,6 +402,7 @@ function render() {
   renderPeople();
   renderIdeas();
   renderActivityBadge();
+  renderChecklist();
 }
 
 function renderChrome() {
@@ -840,6 +845,114 @@ function safeImageUrl(value) {
   }
 }
 
+/* ------------------------------------------------------ getting started */
+
+/** Copy and the existing UI each step opens; which steps are done is lib/checklist.js. */
+const CHECKLIST_STEPS = {
+  name: {
+    icon: "pencil",
+    action: "Name it",
+    doneAction: "Rename",
+    hint: () => "Give it something friendlier than its link.",
+    doneHint: () => `Called \u201c${session.state.name}\u201d.`,
+    open: () => {
+      $("settingsButton").click();
+      $("settingWorkspaceName")?.select();
+    },
+  },
+  times: {
+    icon: "calendar",
+    action: "Add times",
+    doneAction: "Edit",
+    hint: () => "Paint the hours you are free this week.",
+    doneHint: () => "Your times are in.",
+    open: () => $("editOwnAvailability").click(),
+  },
+  invite: {
+    icon: "user-plus",
+    action: "Invite",
+    doneAction: "Invite more",
+    hint: () => {
+      const count = session.state.members.length;
+      const wanted = count === 2 ? "one more friend" : count === 1 ? "two friends" : "a few friends";
+      return `${count} ${count === 1 ? "person" : "people"} so far. Share the link with ${wanted}.`;
+    },
+    doneHint: () => `${session.state.members.length} people are in.`,
+    open: () => $("inviteButton").click(),
+  },
+};
+
+let checklistDismissed = readChecklistDismissed();
+let checklistMarkup = "";
+let checklistDone = {};
+
+function readChecklistDismissed() {
+  try {
+    return window.localStorage.getItem(STORAGE.checklistDismissed(session.slug)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeChecklistDismissed() {
+  try {
+    window.localStorage.setItem(STORAGE.checklistDismissed(session.slug), "1");
+  } catch {
+    /* Without storage the card stays hidden until the page reloads. */
+  }
+}
+
+function checklistStepMarkup(step, index) {
+  const copy = CHECKLIST_STEPS[step.id];
+  const hint = step.done ? copy.doneHint() : copy.hint();
+  const buttonClass = step.done ? "text-button" : "outline-button";
+  return `<li class="checklist-step${step.done ? " is-done" : ""}" data-step="${escapeAttribute(step.id)}">
+    <span class="checklist-mark" aria-hidden="true">${step.done ? svgIcon("check") : index + 1}</span>
+    <div class="checklist-text">
+      <strong>${escapeHtml(step.label)}<span class="checklist-sr">${step.done ? " (done)" : " (to do)"}</span></strong>
+      <small>${escapeHtml(hint)}</small>
+    </div>
+    <button type="button" class="${buttonClass}" data-checklist-step="${escapeAttribute(step.id)}">${step.done ? "" : `${svgIcon(copy.icon)} `}${escapeHtml(step.done ? copy.doneAction : copy.action)}</button>
+  </li>`;
+}
+
+function renderChecklist() {
+  const card = $("checklistCard");
+  const steps = checklistSteps({ state: session.state, member: me(), sourcesCount: calendarSources.length, slug: session.slug });
+  const visible = ui.workspaceLoaded && !checklistDismissed && showChecklist(session.slug, steps);
+  card.hidden = !visible;
+  if (!visible) return;
+
+  const doneCount = steps.filter((step) => step.done).length;
+  $("checklistCount").textContent = `${doneCount} of ${steps.length} done`;
+  $("checklistMeter").style.transform = `scaleX(${doneCount / steps.length})`;
+
+  const markup = steps.map(checklistStepMarkup).join("");
+  if (markup !== checklistMarkup) {
+    checklistMarkup = markup;
+    $("checklistSteps").innerHTML = markup;
+    // A step that just flipped to done gets a small pop, once.
+    for (const step of steps) {
+      if (step.done && checklistDone[step.id] === false) {
+        $("checklistSteps").querySelector(`[data-step="${step.id}"]`)?.classList.add("just-done");
+      }
+    }
+  }
+  checklistDone = Object.fromEntries(steps.map((step) => [step.id, step.done]));
+}
+
+function dismissChecklist() {
+  checklistDismissed = true;
+  writeChecklistDismissed();
+  const card = $("checklistCard");
+  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  card.classList.add("is-leaving");
+  window.setTimeout(() => {
+    card.classList.remove("is-leaving");
+    renderChecklist();
+  }, still ? 0 : 240);
+}
+
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
 }
@@ -924,6 +1037,7 @@ function commitPaint() {
 function saveSources() {
   writeJson(STORAGE.sources, calendarSources);
   renderSources();
+  renderChecklist();
 }
 
 function renderSources() {
@@ -1281,6 +1395,12 @@ $("editOwnAvailability").addEventListener("click", () => {
   render();
   $("availability").scrollIntoView({ behavior: "smooth", block: "start" });
 });
+
+$("checklistSteps").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-checklist-step]");
+  if (button) CHECKLIST_STEPS[button.dataset.checklistStep]?.open();
+});
+$("dismissChecklist").addEventListener("click", dismissChecklist);
 
 const grid = $("calendarGrid");
 
