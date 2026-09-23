@@ -296,7 +296,7 @@
       <form id="profileForm">
         <div class="profile-editor">
           <div class="profile-photo" id="profilePhotoPreview">AM</div>
-          <div><label class="field-label" for="profilePhotoUrl">Profile photo URL</label><input class="text-input" id="profilePhotoUrl" type="url" placeholder="https://…" /><small class="form-hint">Any hosted image link works.</small></div>
+          <div><span class="field-label">Profile photo</span><div class="photo-actions"><button class="outline-button" id="chooseProfilePhoto" type="button">Choose photo</button><button class="text-button" id="removeProfilePhoto" type="button" hidden>Remove</button></div><input id="profilePhotoFile" type="file" accept="image/*" hidden /><input id="profilePhotoUrl" type="hidden" /><small class="form-hint">Opens your photo library or camera.</small></div>
         </div>
         <label class="field-label" for="profileDisplayName">Display name</label>
         <input class="text-input" id="profileDisplayName" placeholder="Alex Morgan" required maxlength="60" />
