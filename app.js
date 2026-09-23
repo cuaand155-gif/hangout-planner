@@ -68,6 +68,7 @@ const supabaseClient = AUTH_CONFIG.configured && window.supabase
   : null;
 
 const $ = (id) => document.getElementById(id);
+const svgIcon = (name) => `<svg class="icon" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 
 /* ------------------------------------------------------------- storage */
 
@@ -105,6 +106,7 @@ const ui = {
   view: "group",
   selectedWindow: null,
   selectedSlot: null,
+  dayIndex: null,
   paint: null,
   editingIdeaId: null,
   saving: false,
@@ -157,6 +159,29 @@ const currentSlots = () => buildSlots({ dayStart: settings().dayStart, dayEnd: s
 const me = () => session.state.members.find((member) => member.id === memberId) || null;
 
 const displayName = () => profile.name || ui.user?.user_metadata?.full_name || ui.user?.user_metadata?.name || "You";
+
+/* Phones show one day at a time instead of a sideways-scrolling week. */
+const phoneQuery = window.matchMedia("(max-width: 620px)");
+
+function dayIndexFor(week) {
+  if (ui.dayIndex !== null) return Math.min(Math.max(ui.dayIndex, 0), week.length - 1);
+  const today = week.findIndex((day) => day.isToday);
+  return today >= 0 ? today : 0;
+}
+
+function visibleDays(week) {
+  return phoneQuery.matches ? [week[dayIndexFor(week)]] : week;
+}
+
+function upcomingWindows(week = currentWeek()) {
+  const now = Date.now();
+  return windowsForWeek(week).filter((window) => window.end.getTime() > now);
+}
+
+function chosenWindow(week) {
+  const windows = windowsForWeek(week);
+  return ui.selectedWindow ? windows.find((window) => window.start.getTime() === ui.selectedWindow) || windows[0] : windows[0];
+}
 
 function windowsForWeek(week = currentWeek()) {
   return findOpenWindows(session.state.members, week, currentSlots(), { minHours: settings().minWindowHours });
@@ -421,7 +446,7 @@ function renderStatus() {
         : "Add your times";
   const icon = $("ownStatusIcon");
   const ready = Boolean(mine && profile.shareSchedule && hasAny);
-  icon.textContent = ready ? "✓" : "＋";
+  icon.innerHTML = svgIcon(ready ? "check" : "plus");
   icon.classList.toggle("green", ready);
   icon.classList.toggle("yellow", !ready);
 
@@ -438,16 +463,57 @@ function renderStatus() {
 
 function renderGrid() {
   const grid = $("calendarGrid");
+
+function showDay(index) {
+  const week = currentWeek();
+  ui.dayIndex = Math.min(Math.max(index, 0), week.length - 1);
+  renderGrid();
+}
+
+$("dayStrip").addEventListener("click", (event) => {
+  const pill = event.target.closest("[data-day-index]");
+  if (pill) showDay(Number(pill.dataset.dayIndex));
+});
+
+$("bestTimes").addEventListener("click", (event) => {
+  const card = event.target.closest("[data-window]");
+  if (!card) return;
+  const week = currentWeek();
+  const window = windowsForWeek(week).find((entry) => entry.start.getTime() === Number(card.dataset.window));
+  if (!window) return;
+  ui.selectedWindow = window.start.getTime();
+  ui.dayIndex = week.findIndex((day) => day.iso === window.day.iso);
+  renderGrid();
+  $("selectedWindow").scrollIntoView({ behavior: "smooth", block: "nearest" });
+});
+
+// Swipe between days on phones (group view only; "My availability" uses drag to paint).
+let swipe = null;
+grid.addEventListener("pointerdown", (event) => {
+  swipe = phoneQuery.matches && ui.view !== "mine" ? { x: event.clientX, y: event.clientY } : null;
+});
+grid.addEventListener("pointerup", (event) => {
+  if (!swipe) return;
+  const dx = event.clientX - swipe.x;
+  const dy = event.clientY - swipe.y;
+  swipe = null;
+  if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) showDay(dayIndexFor(currentWeek()) + (dx < 0 ? 1 : -1));
+});
+
+phoneQuery.addEventListener("change", () => renderGrid());
   const week = currentWeek();
   const slots = currentSlots();
   const mine = me();
   const isMineView = ui.view === "mine";
+  const days = visibleDays(week);
+  const highlight = isMineView ? null : chosenWindow(week);
 
   grid.setAttribute("aria-label", isMineView ? "Your availability" : "Group availability");
-  grid.style.gridTemplateColumns = `62px repeat(${week.length}, 1fr)`;
+  grid.style.gridTemplateColumns = `${phoneQuery.matches ? 52 : 62}px repeat(${days.length}, 1fr)`;
+  grid.classList.toggle("single-day", days.length === 1);
   const cells = [`<div class="grid-corner">${timeZoneOffsetLabel()}</div>`];
 
-  for (const day of week) {
+  for (const day of days) {
     cells.push(
       `<div class="day${day.isToday ? " today" : ""}${day.isWeekend ? " weekend" : ""}"><small>${day.label}</small><strong>${day.dayOfMonth}</strong>${day.isToday ? "<span>Today</span>" : ""}</div>`
     );
@@ -455,12 +521,16 @@ function renderGrid() {
 
   for (const slot of slots) {
     cells.push(`<div class="time-label">${slot.showLabel ? formatHour(slot.hour) : ""}</div>`);
-    for (const day of week) {
+    for (const day of days) {
       const cell = isMineView ? classifySlot(mine ? [mine] : [], day.date, slot.hour) : classifySlot(session.state.members, day.date, slot.hour);
       const className = isMineView ? mineSlotClass(cell, mine) : cell.state;
       const selected = ui.selectedSlot && ui.selectedSlot.iso === day.iso && ui.selectedSlot.hour === slot.hour;
+      const inWindow = highlight && cell.start >= highlight.start && cell.start < highlight.end;
+      const windowEdge = inWindow
+        ? `${cell.start.getTime() === highlight.start.getTime() ? " window-start" : ""}${cell.end.getTime() === highlight.end.getTime() ? " window-end" : ""}`
+        : "";
       cells.push(
-        `<div class="slot ${className}${selected ? " selected" : ""}" role="gridcell" tabindex="0"` +
+        `<div class="slot ${className}${selected ? " selected" : ""}${inWindow ? ` in-window${windowEdge}` : ""}" role="gridcell" tabindex="0"` +
           ` data-iso="${day.iso}" data-hour="${slot.hour}"` +
           ` aria-label="${escapeAttribute(slotLabel(day, slot, cell, isMineView))}"></div>`
       );
@@ -478,7 +548,48 @@ function renderGrid() {
   $("groupViewTab").setAttribute("aria-selected", String(!isMineView));
   $("mineViewTab").setAttribute("aria-selected", String(isMineView));
 
+  renderDayStrip(week);
+  renderBestTimes(week);
   renderSelectedWindow(week);
+}
+
+function renderDayStrip(week) {
+  const strip = $("dayStrip");
+  const active = dayIndexFor(week);
+  const openDays = new Set(upcomingWindows(week).map((window) => window.day.iso));
+  strip.innerHTML = week
+    .map(
+      (day, index) =>
+        `<button type="button" class="day-pill${index === active ? " active" : ""}${day.isToday ? " today" : ""}" data-day-index="${index}" aria-pressed="${index === active}" aria-label="${escapeAttribute(day.longLabel)}">` +
+        `<small>${day.label}</small><strong>${day.dayOfMonth}</strong><i class="${openDays.has(day.iso) ? "open" : ""}"></i></button>`
+    )
+    .join("");
+}
+
+function renderBestTimes(week) {
+  const container = $("bestTimes");
+  const top = upcomingWindows(week).slice(0, 3);
+  if (ui.view === "mine" || !top.length) {
+    container.hidden = true;
+    return;
+  }
+  const sharing = session.state.members.filter((member) => member.sharesSchedule !== false).length;
+  const selected = chosenWindow(week);
+  container.hidden = false;
+  container.innerHTML =
+    `<p class="best-label">Best times</p><div class="best-list">` +
+    top
+      .map((window) => {
+        const key = window.start.getTime();
+        const everyone = sharing && window.memberIds.length >= sharing;
+        const who = everyone ? "Everyone free" : `${window.memberIds.length} free`;
+        return `<button type="button" class="best-card${selected && selected.start.getTime() === key ? " active" : ""}" data-window="${key}">` +
+          `<small>${escapeHtml(formatDayStamp(window.start))}</small>` +
+          `<strong>${escapeHtml(formatClock(window.start))} – ${escapeHtml(formatClock(window.end))}</strong>` +
+          `<span>${who} · ${window.hours} hr${window.hours === 1 ? "" : "s"}</span></button>`;
+      })
+      .join("") +
+    `</div>`;
 }
 
 /**
@@ -524,10 +635,7 @@ function describeSlot(day, slot, cell) {
 }
 
 function renderSelectedWindow(week) {
-  const windows = windowsForWeek(week);
-  const chosen = ui.selectedWindow
-    ? windows.find((window) => window.start.getTime() === ui.selectedWindow) || windows[0]
-    : windows[0];
+  const chosen = chosenWindow(week);
   const container = $("selectedWindow");
 
   if (!chosen || ui.view === "mine") {
@@ -554,7 +662,7 @@ function renderPeople() {
           : "Needs update";
     const statusClass = status === "✓ All set" ? "person-status" : "person-status muted";
     return `<article class="person-card${isYou ? " is-you" : ""}${member.pending ? " pending" : ""}">
-      ${isYou ? '<span class="person-badge">YOU</span>' : `<button class="card-remove" data-remove-member="${escapeAttribute(member.id)}" aria-label="Remove ${escapeAttribute(member.name)}">×</button>`}
+      ${isYou ? '<span class="person-badge">YOU</span>' : `<button class="card-remove" data-remove-member="${escapeAttribute(member.id)}" aria-label="Remove ${escapeAttribute(member.name)}">${svgIcon("x")}</button>`}
       <div class="person-top"><div class="avatar ${member.palette}">${escapeHtml(member.initials)}</div><span class="presence${sharedThisWeek ? "" : " away"}"></span></div>
       <strong>${escapeHtml(member.name)}</strong>
       <small>Updated ${escapeHtml(formatRelative(member.updatedAt))}</small>
@@ -562,7 +670,7 @@ function renderPeople() {
     </article>`;
   });
 
-  cards.push(`<article class="person-card add-person" id="addPerson" role="button" tabindex="0"><div class="add-icon">＋</div><strong>Add someone</strong><small>Invite a friend to join</small></article>`);
+  cards.push(`<article class="person-card add-person" id="addPerson" role="button" tabindex="0"><div class="add-icon">${svgIcon("plus")}</div><strong>Add someone</strong><small>Invite a friend to join</small></article>`);
   grid.innerHTML = cards.join("");
 }
 
@@ -582,14 +690,14 @@ function renderIdeas() {
       const tag = idea.tag || (count && count === top ? "POPULAR" : "IDEA");
       return `<article class="idea-card${count && count === top ? " selected-idea" : ""}">
         <div class="idea-image ${style.key}"><span>${style.emoji}</span>
-          <button class="idea-edit" data-edit-idea="${escapeAttribute(idea.id)}" aria-label="Edit ${escapeAttribute(idea.title)}">✎</button>
-          <button class="heart${voted ? " voted" : ""}" data-vote-idea="${escapeAttribute(idea.id)}" aria-pressed="${voted}" aria-label="${voted ? "Remove your vote for" : "Vote for"} ${escapeAttribute(idea.title)}">${voted ? "♥" : "♡"}</button>
+          <button class="idea-edit" data-edit-idea="${escapeAttribute(idea.id)}" aria-label="Edit ${escapeAttribute(idea.title)}">${svgIcon("pencil")}</button>
+          <button class="heart${voted ? " voted" : ""}" data-vote-idea="${escapeAttribute(idea.id)}" aria-pressed="${voted}" aria-label="${voted ? "Remove your vote for" : "Vote for"} ${escapeAttribute(idea.title)}">${svgIcon(voted ? "heart-fill" : "heart")}</button>
         </div>
         <div class="idea-content">
           <span class="tag ${style.tagClass}">${escapeHtml(tag)}</span>
           <h3>${escapeHtml(idea.title)}</h3>
           <p>${escapeHtml(idea.description)}</p>
-          <div class="idea-meta"><span>⌖ ${escapeHtml(idea.location || "Anywhere")}</span><span>♡ ${count} vote${count === 1 ? "" : "s"}</span></div>
+          <div class="idea-meta"><span>⌖ ${escapeHtml(idea.location || "Anywhere")}</span><span>${svgIcon("heart")} ${count} vote${count === 1 ? "" : "s"}</span></div>
         </div>
       </article>`;
     })
@@ -828,7 +936,7 @@ function renderSources() {
     .map(
       (source, index) => `<div class="source-row">
         <div><strong>${escapeHtml(source.label || source.url)}</strong><small>${source.syncedAt ? `Synced ${escapeHtml(formatRelative(source.syncedAt))} · ${source.blocks || 0} busy blocks` : "Not synced yet"}</small></div>
-        <button type="button" data-remove-source="${index}" aria-label="Remove this calendar link">×</button>
+        <button type="button" data-remove-source="${index}" aria-label="Remove this calendar link">${svgIcon("x")}</button>
       </div>`
     )
     .join("");
@@ -1050,7 +1158,7 @@ function renderGroups() {
             <span class="group-mark">${escapeHtml(initialsFor(name || group.slug))}</span>
             <div><strong>${escapeHtml(name || group.slug)}</strong><small>${escapeHtml(group.onAccount ? "On your account" : "On this device")} · ${escapeHtml(formatRelative(group.at))}</small></div>
             <span class="group-actions">${current ? '<span class="group-current">OPEN</span>' : ""}${
-              !current && !group.onAccount ? `<button type="button" data-forget-group="${escapeAttribute(group.slug)}" aria-label="Remove ${escapeAttribute(name || group.slug)} from this list">×</button>` : ""
+              !current && !group.onAccount ? `<button type="button" data-forget-group="${escapeAttribute(group.slug)}" aria-label="Remove ${escapeAttribute(name || group.slug)} from this list">${svgIcon("x")}</button>` : ""
             }</span>
           </a>`;
         })
@@ -1141,18 +1249,21 @@ for (const button of document.querySelectorAll("[data-scroll]")) {
 
 $("prevWeek").addEventListener("click", () => {
   ui.weekOffset -= 1;
+  ui.dayIndex = null;
   ui.selectedWindow = null;
   ui.selectedSlot = null;
   render();
 });
 $("nextWeek").addEventListener("click", () => {
   ui.weekOffset += 1;
+  ui.dayIndex = null;
   ui.selectedWindow = null;
   ui.selectedSlot = null;
   render();
 });
 $("thisWeek").addEventListener("click", () => {
   ui.weekOffset = 0;
+  ui.dayIndex = null;
   ui.selectedWindow = null;
   render();
 });
@@ -1216,7 +1327,7 @@ grid.addEventListener("keydown", (event) => {
     return;
   }
   const moves = { ArrowLeft: -1, ArrowRight: 1 };
-  const columns = currentWeek().length;
+  const columns = visibleDays(currentWeek()).length;
   const jumps = { ArrowUp: -columns, ArrowDown: columns };
   const delta = moves[event.key] ?? jumps[event.key];
   if (delta === undefined) return;
@@ -1238,7 +1349,7 @@ function selectSlot(slot) {
     const { start } = slotRange(day.date, Number(slot.dataset.hour));
     const containing = windowsForWeek(week).find((window) => window.start <= start && start < window.end);
     ui.selectedWindow = containing ? containing.start.getTime() : ui.selectedWindow;
-    renderSelectedWindow(week);
+    renderGrid();
   }
 }
 
@@ -1484,7 +1595,7 @@ $("syncCalendarButton").addEventListener("click", async () => {
   }
   const button = $("syncCalendarButton");
   button.disabled = true;
-  button.textContent = "↻ Syncing…";
+  button.innerHTML = `${svgIcon("sync")} Syncing…`;
   let total = 0;
   if (hasGoogle) total += (await syncGoogle({ silent: true })) || 0;
   for (const source of icsSources) {
@@ -1497,7 +1608,7 @@ $("syncCalendarButton").addEventListener("click", async () => {
   }
   saveSources();
   button.disabled = false;
-  button.textContent = "↻ Sync calendar";
+  button.innerHTML = `${svgIcon("sync")} Sync calendar`;
   showToast(`Synced ${total} busy block${total === 1 ? "" : "s"} for the next four weeks.`);
 });
 
@@ -1741,7 +1852,7 @@ function renderSavedPeople() {
   $("savedPeople").innerHTML = session.state.members
     .map(
       (member) => `<div class="saved-person"><span class="saved-person-icon">•</span><span>${escapeHtml(member.name)}</span><small>${member.id === memberId ? "You" : member.pending ? "Invited" : "Sharing"}</small>${
-        member.id === memberId ? "" : `<button type="button" data-remove-member="${escapeAttribute(member.id)}" aria-label="Remove ${escapeAttribute(member.name)}">×</button>`
+        member.id === memberId ? "" : `<button type="button" data-remove-member="${escapeAttribute(member.id)}" aria-label="Remove ${escapeAttribute(member.name)}">${svgIcon("x")}</button>`
       }</div>`
     )
     .join("");

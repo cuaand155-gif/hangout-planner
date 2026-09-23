@@ -14,32 +14,34 @@
     <script>try{var p=localStorage.getItem("gatherly-palette");if(p)document.documentElement.dataset.palette=p}catch(e){}</script>
   </head>
   <body>
+    <!-- Icons: Phosphor Light (MIT, phosphoricons.com) -->
+    <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true"><symbol id="i-house" viewBox="0 0 256 256"><path d="M217.9,110.1l-80-80a14,14,0,0,0-19.8,0l-80,80A13.92,13.92,0,0,0,34,120v96a6,6,0,0,0,6,6h64a6,6,0,0,0,6-6V158h36v58a6,6,0,0,0,6,6h64a6,6,0,0,0,6-6V120A13.92,13.92,0,0,0,217.9,110.1ZM210,210H158V152a6,6,0,0,0-6-6H104a6,6,0,0,0-6,6v58H46V120a2,2,0,0,1,.58-1.42l80-80a2,2,0,0,1,2.84,0l80,80A2,2,0,0,1,210,120Z"/></symbol><symbol id="i-clock" viewBox="0 0 256 256"><path d="M128,26A102,102,0,1,0,230,128,102.12,102.12,0,0,0,128,26Zm0,192a90,90,0,1,1,90-90A90.1,90.1,0,0,1,128,218Zm62-90a6,6,0,0,1-6,6H128a6,6,0,0,1-6-6V72a6,6,0,0,1,12,0v50h50A6,6,0,0,1,190,128Z"/></symbol><symbol id="i-sparkle" viewBox="0 0 256 256"><path d="M196.89,130.94,144.4,111.6,125.06,59.11a13.92,13.92,0,0,0-26.12,0L79.6,111.6,27.11,130.94a13.92,13.92,0,0,0,0,26.12L79.6,176.4l19.34,52.49a13.92,13.92,0,0,0,26.12,0L144.4,176.4l52.49-19.34a13.92,13.92,0,0,0,0-26.12Zm-4.15,14.86-55.08,20.3a6,6,0,0,0-3.56,3.56l-20.3,55.08a1.92,1.92,0,0,1-3.6,0L89.9,169.66a6,6,0,0,0-3.56-3.56L31.26,145.8a1.92,1.92,0,0,1,0-3.6l55.08-20.3a6,6,0,0,0,3.56-3.56l20.3-55.08a1.92,1.92,0,0,1,3.6,0l20.3,55.08a6,6,0,0,0,3.56,3.56l55.08,20.3a1.92,1.92,0,0,1,0,3.6ZM146,40a6,6,0,0,1,6-6h18V16a6,6,0,0,1,12,0V34h18a6,6,0,0,1,0,12H182V64a6,6,0,0,1-12,0V46H152A6,6,0,0,1,146,40ZM246,88a6,6,0,0,1-6,6H230v10a6,6,0,0,1-12,0V94H208a6,6,0,0,1,0-12h10V72a6,6,0,0,1,12,0V82h10A6,6,0,0,1,246,88Z"/></symbol><symbol id="i-groups" viewBox="0 0 256 256"><path d="M243.6,148.8a6,6,0,0,1-8.4-1.2A53.58,53.58,0,0,0,192,126a6,6,0,0,1,0-12,26,26,0,1,0-25.18-32.5,6,6,0,0,1-11.62-3,38,38,0,1,1,59.91,39.63A65.69,65.69,0,0,1,244.8,140.4,6,6,0,0,1,243.6,148.8ZM189.19,213a6,6,0,0,1-2.19,8.2,5.9,5.9,0,0,1-3,.81,6,6,0,0,1-5.2-3,59,59,0,0,0-101.62,0,6,6,0,1,1-10.38-6A70.1,70.1,0,0,1,103,182.55a46,46,0,1,1,50.1,0A70.1,70.1,0,0,1,189.19,213ZM128,178a34,34,0,1,0-34-34A34,34,0,0,0,128,178ZM70,120a6,6,0,0,0-6-6A26,26,0,1,1,89.18,81.49a6,6,0,1,0,11.62-3,38,38,0,1,0-59.91,39.63A65.69,65.69,0,0,0,11.2,140.4a6,6,0,1,0,9.6,7.2A53.58,53.58,0,0,1,64,126,6,6,0,0,0,70,120Z"/></symbol><symbol id="i-link" viewBox="0 0 256 256"><path d="M164.25,91.75a6,6,0,0,1,0,8.49l-64,64a6,6,0,0,1-8.49-8.48l64-64A6,6,0,0,1,164.25,91.75ZM214.2,41.8a54.07,54.07,0,0,0-76.38,0L107.75,71.85a6,6,0,0,0,8.49,8.49l30.07-30.06a42,42,0,0,1,59.41,59.41l-30.08,30.07a6,6,0,1,0,8.49,8.49l30.07-30.07A54,54,0,0,0,214.2,41.8ZM139.76,175.64l-30.07,30.08a42,42,0,0,1-59.41-59.41l30.06-30.07a6,6,0,0,0-8.49-8.49l-30,30.07a54,54,0,0,0,76.38,76.39l30.07-30.08a6,6,0,0,0-8.49-8.49Z"/></symbol><symbol id="i-gear" viewBox="0 0 256 256"><path d="M128,82a46,46,0,1,0,46,46A46.06,46.06,0,0,0,128,82Zm0,80a34,34,0,1,1,34-34A34,34,0,0,1,128,162Zm108-54.4a6,6,0,0,0-2.92-4L202.64,86.22l-.42-.71L202.1,51.2A6,6,0,0,0,200,46.64a110.12,110.12,0,0,0-36.07-20.31,6,6,0,0,0-4.84.45L128.46,43.86h-1L96.91,26.76a6,6,0,0,0-4.86-.44A109.92,109.92,0,0,0,56,46.68a6,6,0,0,0-2.12,4.55l-.16,34.34c-.14.23-.28.47-.41.71L22.91,103.57A6,6,0,0,0,20,107.62a104.81,104.81,0,0,0,0,40.78,6,6,0,0,0,2.92,4l30.42,17.33.42.71.12,34.31A6,6,0,0,0,56,209.36a110.12,110.12,0,0,0,36.07,20.31,6,6,0,0,0,4.84-.45l30.61-17.08h1l30.56,17.1A6.09,6.09,0,0,0,162,230a5.83,5.83,0,0,0,1.93-.32,109.92,109.92,0,0,0,36-20.36,6,6,0,0,0,2.12-4.55l.16-34.34c.14-.23.28-.47.41-.71l30.42-17.29a6,6,0,0,0,2.92-4.05A104.81,104.81,0,0,0,236,107.6Zm-11.25,35.79L195.32,160.1a6.07,6.07,0,0,0-2.28,2.3c-.59,1-1.21,2.11-1.86,3.14a6,6,0,0,0-.91,3.16l-.16,33.21a98.15,98.15,0,0,1-27.52,15.53L133,200.88a6,6,0,0,0-2.93-.77h-.14c-1.24,0-2.5,0-3.74,0a6,6,0,0,0-3.07.76L93.45,217.43a98,98,0,0,1-27.56-15.49l-.12-33.17a6,6,0,0,0-.91-3.16c-.64-1-1.27-2.08-1.86-3.14a6,6,0,0,0-2.27-2.3L31.3,143.4a93,93,0,0,1,0-30.79L60.68,95.9A6.07,6.07,0,0,0,63,93.6c.59-1,1.21-2.11,1.86-3.14a6,6,0,0,0,.91-3.16l.16-33.21A98.15,98.15,0,0,1,93.41,38.56L123,55.12a5.81,5.81,0,0,0,3.07.76c1.24,0,2.5,0,3.74,0a6,6,0,0,0,3.07-.76l29.65-16.56a98,98,0,0,1,27.56,15.49l.12,33.17a6,6,0,0,0,.91,3.16c.64,1,1.27,2.08,1.86,3.14a6,6,0,0,0,2.27,2.3L224.7,112.6A93,93,0,0,1,224.73,143.39Z"/></symbol><symbol id="i-bell" viewBox="0 0 256 256"><path d="M166,224a6,6,0,0,1-6,6H96a6,6,0,0,1,0-12h64A6,6,0,0,1,166,224Zm54.11-33a13.83,13.83,0,0,1-12.1,7H48a14,14,0,0,1-12.06-21.06C41.59,167.2,50,139.74,50,104a78,78,0,1,1,156,0c0,35.73,8.42,63.2,14.08,72.94A13.9,13.9,0,0,1,220.11,191Zm-10.41-8C202.13,170,194,139.68,194,104a66,66,0,1,0-132,0c0,35.69-8.14,66-15.71,79a2,2,0,0,0,0,2,1.9,1.9,0,0,0,1.7,1H208a1.9,1.9,0,0,0,1.7-1A2,2,0,0,0,209.7,183Z"/></symbol><symbol id="i-menu" viewBox="0 0 256 256"><path d="M222,128a6,6,0,0,1-6,6H40a6,6,0,0,1,0-12H216A6,6,0,0,1,222,128ZM40,70H216a6,6,0,0,0,0-12H40a6,6,0,0,0,0,12ZM216,186H40a6,6,0,0,0,0,12H216a6,6,0,0,0,0-12Z"/></symbol><symbol id="i-check" viewBox="0 0 256 256"><path d="M228.24,76.24l-128,128a6,6,0,0,1-8.48,0l-56-56a6,6,0,0,1,8.48-8.48L96,191.51,219.76,67.76a6,6,0,0,1,8.48,8.48Z"/></symbol><symbol id="i-plus" viewBox="0 0 256 256"><path d="M222,128a6,6,0,0,1-6,6H134v82a6,6,0,0,1-12,0V134H40a6,6,0,0,1,0-12h82V40a6,6,0,0,1,12,0v82h82A6,6,0,0,1,222,128Z"/></symbol><symbol id="i-lock" viewBox="0 0 256 256"><path d="M208,82H174V56a46,46,0,0,0-92,0V82H48A14,14,0,0,0,34,96V208a14,14,0,0,0,14,14H208a14,14,0,0,0,14-14V96A14,14,0,0,0,208,82ZM94,56a34,34,0,0,1,68,0V82H94ZM210,208a2,2,0,0,1-2,2H48a2,2,0,0,1-2-2V96a2,2,0,0,1,2-2H208a2,2,0,0,1,2,2Z"/></symbol><symbol id="i-arrow" viewBox="0 0 256 256"><path d="M220.24,132.24l-72,72a6,6,0,0,1-8.48-8.48L201.51,134H40a6,6,0,0,1,0-12H201.51L139.76,60.24a6,6,0,0,1,8.48-8.48l72,72A6,6,0,0,1,220.24,132.24Z"/></symbol><symbol id="i-sync" viewBox="0 0 256 256"><path d="M222,48V96a6,6,0,0,1-6,6H168a6,6,0,0,1,0-12h33.52L183.47,72a81.51,81.51,0,0,0-57.53-24h-.46A81.5,81.5,0,0,0,68.19,71.28a6,6,0,1,1-8.38-8.58,93.38,93.38,0,0,1,65.67-26.76H126a93.45,93.45,0,0,1,66,27.53l18,18V48a6,6,0,0,1,12,0ZM187.81,184.72a81.5,81.5,0,0,1-57.29,23.34h-.46a81.51,81.51,0,0,1-57.53-24L54.48,166H88a6,6,0,0,0,0-12H40a6,6,0,0,0-6,6v48a6,6,0,0,0,12,0V174.48l18,18.05a93.45,93.45,0,0,0,66,27.53h.52a93.38,93.38,0,0,0,65.67-26.76,6,6,0,1,0-8.38-8.58Z"/></symbol><symbol id="i-share" viewBox="0 0 256 256"><path d="M214,112v96a14,14,0,0,1-14,14H56a14,14,0,0,1-14-14V112A14,14,0,0,1,56,98H80a6,6,0,0,1,0,12H56a2,2,0,0,0-2,2v96a2,2,0,0,0,2,2H200a2,2,0,0,0,2-2V112a2,2,0,0,0-2-2H176a6,6,0,0,1,0-12h24A14,14,0,0,1,214,112ZM92.24,68.24,122,38.49V136a6,6,0,0,0,12,0V38.49l29.76,29.75a6,6,0,1,0,8.48-8.48l-40-40a6,6,0,0,0-8.48,0l-40,40a6,6,0,1,0,8.48,8.48Z"/></symbol><symbol id="i-x" viewBox="0 0 256 256"><path d="M204.24,195.76a6,6,0,1,1-8.48,8.48L128,136.49,60.24,204.24a6,6,0,0,1-8.48-8.48L119.51,128,51.76,60.24a6,6,0,0,1,8.48-8.48L128,119.51l67.76-67.75a6,6,0,0,1,8.48,8.48L136.49,128Z"/></symbol><symbol id="i-pencil" viewBox="0 0 256 256"><path d="M225.9,74.78,181.21,30.09a14,14,0,0,0-19.8,0L38.1,153.41a13.94,13.94,0,0,0-4.1,9.9V208a14,14,0,0,0,14,14H92.69a13.94,13.94,0,0,0,9.9-4.1L225.9,94.58a14,14,0,0,0,0-19.8ZM94.1,209.41a2,2,0,0,1-1.41.59H48a2,2,0,0,1-2-2V163.31a2,2,0,0,1,.59-1.41L136,72.48,183.51,120ZM217.41,86.1,192,111.51,144.49,64,169.9,38.58a2,2,0,0,1,2.83,0l44.68,44.69a2,2,0,0,1,0,2.83Z"/></symbol><symbol id="i-heart" viewBox="0 0 256 256"><path d="M178,42c-21,0-39.26,9.47-50,25.34C117.26,51.47,99,42,78,42a60.07,60.07,0,0,0-60,60c0,29.2,18.2,59.59,54.1,90.31a334.68,334.68,0,0,0,53.06,37,6,6,0,0,0,5.68,0,334.68,334.68,0,0,0,53.06-37C219.8,161.59,238,131.2,238,102A60.07,60.07,0,0,0,178,42ZM128,217.11C111.59,207.64,30,157.72,30,102A48.05,48.05,0,0,1,78,54c20.28,0,37.31,10.83,44.45,28.27a6,6,0,0,0,11.1,0C140.69,64.83,157.72,54,178,54a48.05,48.05,0,0,1,48,48C226,157.72,144.41,207.64,128,217.11Z"/></symbol><symbol id="i-dots" viewBox="0 0 256 256"><path d="M138,128a10,10,0,1,1-10-10A10,10,0,0,1,138,128ZM60,118a10,10,0,1,0,10,10A10,10,0,0,0,60,118Zm136,0a10,10,0,1,0,10,10A10,10,0,0,0,196,118Z"/></symbol><symbol id="i-caret" viewBox="0 0 256 256"><path d="M212.24,100.24l-80,80a6,6,0,0,1-8.48,0l-80-80a6,6,0,0,1,8.48-8.48L128,167.51l75.76-75.75a6,6,0,0,1,8.48,8.48Z"/></symbol><symbol id="i-calendar" viewBox="0 0 256 256"><path d="M208,34H182V24a6,6,0,0,0-12,0V34H86V24a6,6,0,0,0-12,0V34H48A14,14,0,0,0,34,48V208a14,14,0,0,0,14,14H208a14,14,0,0,0,14-14V48A14,14,0,0,0,208,34ZM48,46H74V56a6,6,0,0,0,12,0V46h84V56a6,6,0,0,0,12,0V46h26a2,2,0,0,1,2,2V82H46V48A2,2,0,0,1,48,46ZM208,210H48a2,2,0,0,1-2-2V94H210V208A2,2,0,0,1,208,210Z"/></symbol><symbol id="i-pin" viewBox="0 0 256 256"><path d="M128,66a38,38,0,1,0,38,38A38,38,0,0,0,128,66Zm0,64a26,26,0,1,1,26-26A26,26,0,0,1,128,130Zm0-112a86.1,86.1,0,0,0-86,86c0,30.91,14.34,63.74,41.47,94.94a252.32,252.32,0,0,0,41.09,38,6,6,0,0,0,6.88,0,252.32,252.32,0,0,0,41.09-38c27.13-31.2,41.47-64,41.47-94.94A86.1,86.1,0,0,0,128,18Zm0,206.51C113,212.93,54,163.62,54,104a74,74,0,0,1,148,0C202,163.62,143,212.93,128,224.51Z"/></symbol><symbol id="i-image" viewBox="0 0 256 256"><path d="M216,42H40A14,14,0,0,0,26,56V200a14,14,0,0,0,14,14H216a14,14,0,0,0,14-14V56A14,14,0,0,0,216,42ZM40,54H216a2,2,0,0,1,2,2V163.57L188.53,134.1a14,14,0,0,0-19.8,0l-21.42,21.42L101.9,110.1a14,14,0,0,0-19.8,0L38,154.2V56A2,2,0,0,1,40,54ZM38,200V171.17l52.58-52.58a2,2,0,0,1,2.84,0L176.83,202H40A2,2,0,0,1,38,200Zm178,2H193.8l-38-38,21.41-21.42a2,2,0,0,1,2.83,0l38,38V200A2,2,0,0,1,216,202ZM146,100a10,10,0,1,1,10,10A10,10,0,0,1,146,100Z"/></symbol><symbol id="i-sun" viewBox="0 0 256 256"><path d="M122,40V16a6,6,0,0,1,12,0V40a6,6,0,0,1-12,0Zm68,88a62,62,0,1,1-62-62A62.07,62.07,0,0,1,190,128Zm-12,0a50,50,0,1,0-50,50A50.06,50.06,0,0,0,178,128ZM59.76,68.24a6,6,0,1,0,8.48-8.48l-16-16a6,6,0,0,0-8.48,8.48Zm0,119.52-16,16a6,6,0,1,0,8.48,8.48l16-16a6,6,0,1,0-8.48-8.48ZM192,70a6,6,0,0,0,4.24-1.76l16-16a6,6,0,0,0-8.48-8.48l-16,16A6,6,0,0,0,192,70Zm4.24,117.76a6,6,0,0,0-8.48,8.48l16,16a6,6,0,0,0,8.48-8.48ZM46,128a6,6,0,0,0-6-6H16a6,6,0,0,0,0,12H40A6,6,0,0,0,46,128Zm82,82a6,6,0,0,0-6,6v24a6,6,0,0,0,12,0V216A6,6,0,0,0,128,210Zm112-88H216a6,6,0,0,0,0,12h24a6,6,0,0,0,0-12Z"/></symbol><symbol id="i-moon" viewBox="0 0 256 256"><path d="M232.13,143.64a6,6,0,0,0-6-1.49A90.07,90.07,0,0,1,113.86,29.85a6,6,0,0,0-7.49-7.48A102.88,102.88,0,0,0,54.48,58.68,102,102,0,0,0,197.32,201.52a102.88,102.88,0,0,0,36.31-51.89A6,6,0,0,0,232.13,143.64Zm-42,48.29a90,90,0,0,1-126-126A90.9,90.9,0,0,1,99.65,37.66,102.06,102.06,0,0,0,218.34,156.35,90.9,90.9,0,0,1,190.1,191.93Z"/></symbol><symbol id="i-user-plus" viewBox="0 0 256 256"><path d="M254,136a6,6,0,0,1-6,6H230v18a6,6,0,0,1-12,0V142H200a6,6,0,0,1,0-12h18V112a6,6,0,0,1,12,0v18h18A6,6,0,0,1,254,136Zm-57.41,60.14a6,6,0,1,1-9.18,7.72C166.9,179.45,138.69,166,108,166s-58.89,13.45-79.41,37.86a6,6,0,0,1-9.18-7.72C35.14,177.41,55,164.48,77,158.25a66,66,0,1,1,62,0C161,164.48,180.86,177.41,196.59,196.14ZM108,154a54,54,0,1,0-54-54A54.06,54.06,0,0,0,108,154Z"/></symbol><symbol id="i-users" viewBox="0 0 256 256"><path d="M112.6,158.43a58,58,0,1,0-57.2,0A93.83,93.83,0,0,0,5.21,196.72a6,6,0,0,0,10.05,6.56,82,82,0,0,1,137.48,0,6,6,0,0,0,10-6.56A93.83,93.83,0,0,0,112.6,158.43ZM38,108a46,46,0,1,1,46,46A46.06,46.06,0,0,1,38,108Zm211,97a6,6,0,0,1-8.3-1.74A81.8,81.8,0,0,0,172,166a6,6,0,0,1,0-12,46,46,0,1,0-17.08-88.73,6,6,0,1,1-4.46-11.14,58,58,0,0,1,50.14,104.3,93.83,93.83,0,0,1,50.19,38.29A6,6,0,0,1,249,205Z"/></symbol><symbol id="i-flag" viewBox="0 0 256 256"><path d="M44.08,51.37A6,6,0,0,0,42,55.9V224a6,6,0,0,0,12,0V178.78c28.08-22.79,51.88-11,79.34,2.57,16.12,8,33.49,16.58,52,16.58,13.57,0,27.76-4.6,42.56-17.42A6,6,0,0,0,230,176V55.9a6,6,0,0,0-9.93-4.54c-29,25.12-53.28,13.09-81.41-.84C110.77,36.71,79,21.16,44.08,51.37ZM218,173.17c-28.08,22.8-51.88,11-79.34-2.58C113.4,158.08,85.09,144.07,54,164V58.72c28.08-22.8,51.88-11,79.34,2.56C158.6,73.79,186.91,87.8,218,67.91Z"/></symbol><symbol id="i-heart-fill" viewBox="0 0 256 256"><path d="M240,102c0,70-103.79,126.66-108.21,129a8,8,0,0,1-7.58,0C119.79,228.66,16,172,16,102A62.07,62.07,0,0,1,78,40c20.65,0,38.73,8.88,50,23.89C139.27,48.88,157.35,40,178,40A62.07,62.07,0,0,1,240,102Z"/></symbol></svg>
     <div class="app-shell">
       <aside class="sidebar" id="sidebar">
         <a class="brand" href="#overview" aria-label="Gatherly home"><span class="brand-mark">✦</span><span>gatherly</span></a>
         <nav class="main-nav" aria-label="Main navigation">
-          <a class="nav-item active" href="#overview"><span class="nav-icon">⌂</span>Overview</a>
-          <a class="nav-item" href="#availability"><span class="nav-icon">◷</span>Availability</a>
-          <a class="nav-item" href="#ideas"><span class="nav-icon">✣</span>Activity ideas</a>
+          <a class="nav-item active" href="#overview"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-house"/></svg></span>Overview</a>
+          <a class="nav-item" href="#availability"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg></span>Availability</a>
+          <a class="nav-item" href="#ideas"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-sparkle"/></svg></span>Activity ideas</a>
         </nav>
         <div class="sidebar-bottom">
-          <button class="nav-item nav-button" id="groupsButton"><span class="nav-icon">◎</span>Your groups</button>
-          <button class="nav-item nav-button" id="calendarButton"><span class="nav-icon">↗</span>Calendar links</button>
-          <button class="nav-item nav-button" id="settingsButton"><span class="nav-icon">⚙</span>Settings</button>
+          <button class="nav-item nav-button" id="groupsButton"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-groups"/></svg></span>Your groups</button>
+          <button class="nav-item nav-button" id="calendarButton"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></span>Calendar links</button>
+          <button class="nav-item nav-button" id="settingsButton"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-gear"/></svg></span>Settings</button>
           <button class="profile-card profile-button" id="accountButton" aria-label="Open your profile">
             <div class="avatar avatar-lilac">AM</div>
             <div><strong id="profileName">You</strong><small id="profileSubtitle">Personal space</small></div>
-            <span class="more">•••</span>
+            <span class="more"><svg class="icon" aria-hidden="true"><use href="#i-dots"/></svg></span>
           </button>
         </div>
       </aside>
 
       <main class="main-content">
         <header class="topbar">
-          <button class="mobile-menu" id="mobileMenu" aria-label="Open menu" aria-expanded="false">☰</button>
-          <div class="breadcrumb"><span>Group</span><b>/</b><button class="breadcrumb-switch" id="switchGroup" aria-label="Switch group"><strong id="workspaceName">Weekend crew</strong><span aria-hidden="true">⌄</span></button></div>
+          <button class="mobile-menu" id="mobileMenu" aria-label="Open menu" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#i-menu"/></svg></button>
+          <div class="breadcrumb"><span>Group</span><b>/</b><button class="breadcrumb-switch" id="switchGroup" aria-label="Switch group"><strong id="workspaceName">Weekend crew</strong><span aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#i-caret"/></svg></span></button></div>
           <div class="top-actions">
-            <button class="icon-button" id="activityButton" aria-label="Recent activity">♧<i id="activityDot" hidden></i></button>
+            <button class="icon-button" id="activityButton" aria-label="Recent activity"><svg class="icon" aria-hidden="true"><use href="#i-bell"/></svg><i id="activityDot" hidden></i></button>
             <button class="avatar avatar-lilac account-avatar" id="topAccountButton" aria-label="Open your profile">AM</button>
           </div>
         </header>
@@ -52,24 +54,24 @@
               <p class="hero-copy">Find a moment that works for everyone, then fill it with something worth remembering.</p>
             </div>
             <div class="hero-actions">
-              <button class="outline-button" id="tentativePlanButton">＋ Set a tentative plan</button>
-              <button class="primary-button" id="inviteButton"><span>＋</span> Invite a friend</button>
+              <button class="outline-button" id="tentativePlanButton"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg> Set a tentative plan</button>
+              <button class="primary-button" id="inviteButton"><svg class="icon" aria-hidden="true"><use href="#i-user-plus"/></svg> Invite a friend</button>
             </div>
           </section>
 
           <section class="status-row" aria-label="Planning status">
             <div class="status-card">
-              <div class="status-icon green" id="ownStatusIcon">✓</div>
+              <div class="status-icon green" id="ownStatusIcon"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></div>
               <div><small>YOUR AVAILABILITY</small><strong id="ownStatus">Ready to share</strong></div>
               <button class="text-button" id="editOwnAvailability">Edit</button>
             </div>
             <div class="status-card">
-              <div class="status-icon yellow">◷</div>
+              <div class="status-icon yellow"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg></div>
               <div><small id="weekScopeLabel">THIS WEEK</small><strong id="overlapSummary">Looking for overlaps…</strong></div>
               <button class="text-button" data-scroll="availability">View</button>
             </div>
             <div class="status-card privacy-status">
-              <div class="status-icon purple">◉</div>
+              <div class="status-icon purple"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg></div>
               <div><small>PRIVACY</small><strong id="privacyStatus">Busy / free only</strong></div>
               <button class="text-button" id="privacyButton">Manage</button>
             </div>
@@ -79,12 +81,12 @@
             <div class="section-heading compact">
               <div><p class="eyebrow">JUST A THOUGHT</p><h2>Keep a maybe on the calendar</h2><p>Save the idea now and find the best time with your group later.</p></div>
               <div class="heading-actions">
-                <button class="text-button" id="editTentativePlan">Edit plan <span>→</span></button>
+                <button class="text-button" id="editTentativePlan">Edit plan <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button>
                 <button class="text-button subtle" id="removeTentativePlan">Remove</button>
               </div>
             </div>
             <article class="tentative-card">
-              <div class="tentative-icon">✦</div>
+              <div class="tentative-icon"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg></div>
               <div class="tentative-details">
                 <span class="tentative-label">TENTATIVE PLAN</span>
                 <h3 id="tentativeTitle"></h3>
@@ -127,17 +129,19 @@
                 <span><i class="legend-dot busy"></i>You’re busy</span>
               </div>
               <div class="header-actions">
-                <button class="outline-button" id="syncCalendarButton">↻ Sync calendar</button>
-                <button class="outline-button" id="shareButton">↗ Share view</button>
+                <button class="outline-button" id="syncCalendarButton"><svg class="icon" aria-hidden="true"><use href="#i-sync"/></svg> Sync calendar</button>
+                <button class="outline-button" id="shareButton"><svg class="icon" aria-hidden="true"><use href="#i-share"/></svg> Share view</button>
               </div>
             </div>
             <p class="edit-hint" id="editHint" hidden>Mark the hours you’re busy by clicking or dragging. Anything you leave light is shared with your group as free.</p>
+            <div class="best-times" id="bestTimes" hidden></div>
+            <div class="day-strip" id="dayStrip" aria-label="Pick a day"></div>
             <div id="calendarGrid" class="calendar-grid" role="grid" aria-label="Group availability"></div>
             <p class="slot-detail" id="slotDetail" aria-live="polite"></p>
             <div class="selected-window" id="selectedWindow" hidden>
-              <div class="window-icon">✦</div>
+              <div class="window-icon"><svg class="icon" aria-hidden="true"><use href="#i-sparkle"/></svg></div>
               <div><strong id="selectedWindowTitle"></strong><p id="selectedWindowDetail"></p></div>
-              <button class="primary-button small" id="planButton">Plan something <span>→</span></button>
+              <button class="primary-button small" id="planButton">Plan something <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button>
             </div>
             <div class="mine-actions" id="mineActions" hidden>
               <button class="outline-button" id="saveUsualWeek">Save as my usual week</button>
@@ -148,7 +152,7 @@
           <section class="people-section">
             <div class="section-heading compact">
               <div><p class="eyebrow" id="peopleCount">PEOPLE</p><h2>Everyone’s in the loop</h2></div>
-              <button class="text-button" id="managePeople">Manage people <span id="friendBadge" class="count-badge" hidden></span> <span>→</span></button>
+              <button class="text-button" id="managePeople">Manage people <span id="friendBadge" class="count-badge" hidden></span> <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button>
             </div>
             <div class="people-grid" id="peopleGrid"></div>
           </section>
@@ -156,12 +160,12 @@
           <section class="ideas-section" id="ideas">
             <div class="section-heading compact">
               <div><p class="eyebrow">MAKE IT COUNT</p><h2>What sounds good?</h2></div>
-              <button class="outline-button" id="addIdea">＋ Add an idea</button>
+              <button class="outline-button" id="addIdea"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg> Add an idea</button>
             </div>
             <div class="idea-grid" id="ideaGrid"></div>
           </section>
 
-          <footer><span>Made for the moments between plans.</span><span>Privacy-first by design <b>✦</b></span></footer>
+          <footer><span>Made for the moments between plans.</span><span>Privacy-first by design</span></footer>
         </div>
       </main>
     </div>
@@ -169,7 +173,7 @@
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
     <dialog id="privacyDialog">
-      <div class="dialog-header"><div><p class="eyebrow">PRIVACY CONTROLS</p><h2>Your calendar, your call.</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <div class="dialog-header"><div><p class="eyebrow">PRIVACY CONTROLS</p><h2>Your calendar, your call.</h2></div><button class="close-dialog" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
       <p class="dialog-copy">Choose how much detail this group shares when calendars are imported. Busy times are always just blocks of time until you opt in to more.</p>
       <div class="privacy-options">
         <label class="privacy-option active"><input type="radio" name="privacy" value="busy" checked /><span class="radio"></span><span><strong>Busy / free only</strong><small>Show available time blocks without event names or locations.</small></span></label>
@@ -180,7 +184,7 @@
     </dialog>
 
     <dialog id="calendarDialog">
-      <div class="dialog-header"><div><p class="eyebrow">OPTIONAL INTEGRATION</p><h2>Connect a calendar.</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <div class="dialog-header"><div><p class="eyebrow">OPTIONAL INTEGRATION</p><h2>Connect a calendar.</h2></div><button class="close-dialog" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
       <p class="dialog-copy">Import busy times automatically, or paste a read-only calendar link. Gatherly only ever reads — it never edits your events.</p>
       <div class="integration-option">
         <div class="integration-icon google">G</div>
@@ -202,7 +206,7 @@
     </dialog>
 
     <dialog id="accountDialog">
-      <div class="dialog-header"><div><p class="eyebrow">YOUR ACCOUNT</p><h2 id="accountTitle">Keep your plans together.</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <div class="dialog-header"><div><p class="eyebrow">YOUR ACCOUNT</p><h2 id="accountTitle">Keep your plans together.</h2></div><button class="close-dialog" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
       <p class="dialog-copy" id="accountCopy">Sign in to keep your groups and availability wherever you plan.</p>
       <div class="account-status"><span class="account-status-dot" id="accountStatusDot"></span><div><strong id="accountStatus">Not signed in</strong><small id="accountStatusDetail">Your local planner session is active.</small></div></div>
       <button class="google-button" id="googleSignInButton"><span class="google-logo">G</span> Continue with Google</button>
@@ -211,7 +215,7 @@
     </dialog>
 
     <dialog id="tentativePlanDialog">
-      <div class="dialog-header"><div><p class="eyebrow">TENTATIVE PLAN</p><h2>What might be fun?</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <div class="dialog-header"><div><p class="eyebrow">TENTATIVE PLAN</p><h2>What might be fun?</h2></div><button class="close-dialog" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
       <p class="dialog-copy">Save an idea without locking anyone into a date. We’ll use the timing you choose to find overlaps.</p>
       <form id="tentativePlanForm">
         <label class="field-label" for="planActivity">Plan idea</label>
@@ -236,7 +240,7 @@
     </dialog>
 
     <dialog id="peopleDialog">
-      <div class="dialog-header"><div><p class="eyebrow">YOUR CIRCLE</p><h2>Friends and groups</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <div class="dialog-header"><div><p class="eyebrow">YOUR CIRCLE</p><h2>Friends and groups</h2></div><button class="close-dialog" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
       <p class="dialog-copy">Share the link so friends can add their own times, or add a placeholder for someone you’ll chase later.</p>
       <label class="field-label" for="inviteLink">Invite link</label>
       <div class="copy-row"><input class="text-input" id="inviteLink" readonly /><button class="outline-button" id="copyInviteLink" type="button">Copy</button></div>
@@ -292,7 +296,7 @@
     </dialog>
 
     <dialog id="profileDialog">
-      <div class="dialog-header"><div><p class="eyebrow">YOUR PROFILE</p><h2>How friends see you.</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <div class="dialog-header"><div><p class="eyebrow">YOUR PROFILE</p><h2>How friends see you.</h2></div><button class="close-dialog" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
       <p class="dialog-copy">Add a photo and a name so your friends know whose schedule they’re comparing.</p>
       <form id="profileForm">
         <div class="profile-editor">
@@ -308,7 +312,7 @@
     </dialog>
 
     <dialog id="ideaDialog">
-      <div class="dialog-header"><div><p class="eyebrow" id="ideaDialogEyebrow">NEW IDEA</p><h2 id="ideaDialogTitle">What sounds good?</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <div class="dialog-header"><div><p class="eyebrow" id="ideaDialogEyebrow">NEW IDEA</p><h2 id="ideaDialogTitle">What sounds good?</h2></div><button class="close-dialog" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
       <form id="ideaForm">
         <label class="field-label" for="ideaTitle">Idea</label>
         <input class="text-input" id="ideaTitle" placeholder="Slow morning brunch" required maxlength="80" />
@@ -326,7 +330,7 @@
     </dialog>
 
     <dialog id="settingsDialog">
-      <div class="dialog-header"><div><p class="eyebrow">SETTINGS</p><h2>How this planner works.</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <div class="dialog-header"><div><p class="eyebrow">SETTINGS</p><h2>How this planner works.</h2></div><button class="close-dialog" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
       <p class="field-label" id="paletteLabel">Colour</p>
       <div class="palette-picker" id="palettePicker" role="radiogroup" aria-labelledby="paletteLabel"></div>
       <p class="form-hint">Just for you, on this device.</p>
@@ -351,7 +355,7 @@
     </dialog>
 
     <dialog id="groupsDialog">
-      <div class="dialog-header"><div><p class="eyebrow">YOUR GROUPS</p><h2>Everywhere you plan.</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <div class="dialog-header"><div><p class="eyebrow">YOUR GROUPS</p><h2>Everywhere you plan.</h2></div><button class="close-dialog" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
       <div class="group-list" id="groupList"></div>
       <p class="form-hint" id="groupsHint"></p>
       <form id="newGroupForm">
@@ -365,7 +369,7 @@
     </dialog>
 
     <dialog id="activityDialog">
-      <div class="dialog-header"><div><p class="eyebrow">RECENT ACTIVITY</p><h2>What changed.</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <div class="dialog-header"><div><p class="eyebrow">RECENT ACTIVITY</p><h2>What changed.</h2></div><button class="close-dialog" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
       <div class="activity-list" id="activityList"></div>
     </dialog>
 
