@@ -13,7 +13,7 @@ No build step, no frontend framework, no npm dependencies.
 
 ```bash
 npm run dev          # http://localhost:4173
-npm test             # 107 unit and API tests, no dependencies
+npm test             # 116 unit and API tests, no dependencies
 ```
 
 `npm run dev` serves the static files *and* the `/api` handlers, so the app
@@ -135,13 +135,14 @@ See [DEPLOY.md](DEPLOY.md) for hosting, database and Google sign-in setup.
 - Refreshing happens while Gatherly is open. Nothing syncs in the background
   while it's closed — that would mean the server holding everyone's calendar
   access long-term.
-- Calendar entries carrying a timezone are read in *your* timezone. If your
-  calendar is in a different timezone from the person reading it, those times
-  will be off.
+- Calendar entries are converted from the timezone they were written in,
+  including Outlook's Windows zone names. Entries with no timezone at all
+  ("floating" times) and zones the server doesn't recognise are read in the
+  viewer's own timezone.
 - Everyone in one workspace shares one grid of hours and one week layout
   (Settings), and all times are displayed in each viewer's own timezone.
 - A friend request notifies nobody by email — it waits in the app until the
   recipient signs in. Tell them it's there, or just send the invite link.
-- Friend requests notify nobody by email, as above. Everything else about them
-  has been run against the live database: `supabase/rls-test.sql` checks the
-  policies hold, and the app flows are covered by browser tests.
+  Everything else about them has been run against the live database:
+  `supabase/rls-test.sql` checks the policies hold, and the app flows are
+  covered by browser tests.
