@@ -27,9 +27,12 @@ function send(response, status, body) {
   response.status(status).json(body);
 }
 
+// The Supabase/Vercel integration provisions NEXT_PUBLIC_SUPABASE_URL and
+// SUPABASE_SECRET_KEY; a hand-made setup usually has SUPABASE_URL and
+// SUPABASE_SERVICE_ROLE_KEY. Accept either so both paths work.
 function config() {
-  const url = (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  const url = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/+$/, "");
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY || "";
   return url && key ? { url, key } : null;
 }
 

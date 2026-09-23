@@ -13,11 +13,18 @@ visitor's own device. Nothing is shared between people.
 2. Open [`supabase/schema.sql`](supabase/schema.sql), click **Raw**, and copy
    the SQL. Paste the SQL itself into a new query in the Supabase SQL editor and
    click **Run** — paste the file's contents, not its path.
-3. In your host, set two **server-side** environment variables (names in
-   [`.env.example`](.env.example)):
-   - `SUPABASE_URL` — the project URL.
-   - `SUPABASE_SERVICE_ROLE_KEY` — Project Settings → API → service role key.
-4. Redeploy.
+3. Give the host the project URL and the service-role key, either way:
+   - **Supabase → Settings → Integrations → Install Vercel integration.** It
+     provisions the variables itself (`NEXT_PUBLIC_SUPABASE_URL`,
+     `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_SECRET_KEY` and others).
+   - **Or by hand**, using the names in [`.env.example`](.env.example):
+     `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (Settings → API Keys).
+
+   `api/workspace.js` accepts either naming. Note that Vercel cannot rename an
+   existing variable and will not reveal a secret's value, so correcting a
+   wrongly-named one means deleting it and adding a new one.
+4. Redeploy. Variables only apply to the environments they are scoped to, so
+   scope them to Preview as well if you want preview URLs to persist too.
 
 The service-role key must stay server-side. It is only read by `api/workspace.js`;
 never put it in `app.js` or any other file the browser downloads. The

@@ -78,7 +78,9 @@ test("the calendar endpoint validates method, url and range before fetching", as
 
 test("the workspace endpoint serves a demo workspace when no database is configured", async () => {
   const previous = process.env.SUPABASE_URL;
+  const previousPublic = process.env.NEXT_PUBLIC_SUPABASE_URL;
   delete process.env.SUPABASE_URL;
+  delete process.env.NEXT_PUBLIC_SUPABASE_URL;
   try {
     const result = await call(workspaceHandler, { method: "GET", query: { slug: "Weekend Crew!" } });
     assert.equal(result.status, 200);
@@ -91,6 +93,8 @@ test("the workspace endpoint serves a demo workspace when no database is configu
   } finally {
     if (previous === undefined) delete process.env.SUPABASE_URL;
     else process.env.SUPABASE_URL = previous;
+    if (previousPublic === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = previousPublic;
   }
 });
 
@@ -229,4 +233,30 @@ test("ownership cannot be taken over by an anonymous writer", async (t) => {
   });
   assert.equal(result.status, 200);
   assert.equal(result.body.state.ownerId, "user-1", "the stored owner is kept");
+});
+
+test("either the integration's variable names or the hand-made ones work", async (t) => {
+  // The Supabase/Vercel integration sets NEXT_PUBLIC_SUPABASE_URL and
+  // SUPABASE_SECRET_KEY rather than SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY.
+  const saved = { ...process.env };
+  for (const key of ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_SECRET_KEY"]) delete process.env[key];
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  process.env.SUPABASE_SECRET_KEY = "service-role-key";
+  t.after(() => {
+    for (const key of ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_SECRET_KEY"]) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  });
+
+  let asked = null;
+  t.mock.method(globalThis, "fetch", async (url) => {
+    asked = String(url);
+    return new Response(JSON.stringify([{ slug: "team", state: { name: "Team" }, updated_at: "2026-09-21T10:00:00.000Z" }]), { status: 200 });
+  });
+
+  const result = await call(workspaceHandler, { method: "GET", query: { slug: "team" } });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.persisted, true, "the integration's variable names are enough to persist");
+  assert.match(asked, /^https:\/\/example\.supabase\.co\/rest\/v1\/workspaces/);
 });
