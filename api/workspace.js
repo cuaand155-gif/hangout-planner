@@ -12,14 +12,16 @@
 // 409 with the current state instead of silently overwriting each other.
 
 import { createDemoState, normalizeWorkspaceState, slugify, stateTooLarge } from "../lib/planner.js";
+import { DEMO_SLUG, placeholderName } from "../lib/checklist.js";
 import { bearer, config, restHeaders, send, userFromToken } from "./_supabase.js";
 
-const MAX_BODY_BYTES = 512 * 1024;
+// Room for a full-size state (LIMITS.stateBytes) plus the request wrapper.
+const MAX_BODY_BYTES = 2 * 1024 * 1024;
 
 /** A new workspace starts empty; the default slug keeps the sample crew. */
 function seedFor(slug) {
   return normalizeWorkspaceState(
-    slug === "weekend-crew" ? createDemoState() : { name: slug.replace(/-/g, " ").replace(/^./, (character) => character.toUpperCase()) }
+    slug === DEMO_SLUG ? createDemoState() : { name: placeholderName(slug) }
   );
 }
 
@@ -92,9 +94,11 @@ async function handle(request, response) {
       try {
         const payload = await readBody(request);
         state = normalizeWorkspaceState(payload?.state ?? payload);
-      } catch {
-        return send(response, 400, { error: "Invalid JSON body" });
+      } catch (error) {
+        const tooLarge = error instanceof Error && error.message === "too-large";
+        return send(response, tooLarge ? 413 : 400, { error: tooLarge ? "Workspace is too large" : "Invalid JSON body" });
       }
+      if (stateTooLarge(state)) return send(response, 413, { error: "Workspace is too large" });
     }
     return send(response, 200, {
       slug,
