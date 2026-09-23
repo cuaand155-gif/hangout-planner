@@ -1,357 +1,2062 @@
-// Replace this small configuration section when wiring a real Supabase Auth client.
-// Keep configured false until the provider credentials and callback flow are deployed.
+import {
+  AVATAR_PALETTES,
+  IDEA_STYLES,
+  addDays,
+  buildSlots,
+  buildWeek,
+  classifySlot,
+  createDemoState,
+  createId,
+  describeWindow,
+  findOpenWindows,
+  formatClock,
+  formatDayStamp,
+  formatHour,
+  formatRelative,
+  formatWeekLabel,
+  formatWindow,
+  hasVoted,
+  initialsFor,
+  isSharingOn,
+  materializeWeek,
+  normalizeWorkspaceState,
+  rankIdeas,
+  replaceBusyRange,
+  slotRange,
+  slugify,
+  startOfWeek,
+  timeZoneLabel,
+  timeZoneOffsetLabel,
+  voteCount,
+  widenCoverage,
+} from "./lib/planner.js";
+import { applyMembership, findMemberForParty, linkMemberToParty, normalizeEmail, planManualClaim, resolveMembership } from "./lib/membership.js";
+import { createFriendStore, describeParty, partitionRequests, profileIdsFor, rejectionFor } from "./lib/friends.js";
+
+// Browser-safe credentials: the publishable (anon) key is designed to ship in
+// client code. Row level security in supabase/schema.sql is what protects data.
 const AUTH_CONFIG = {
   provider: "supabase",
   configured: true,
   supabaseUrl: "https://xgsskeblzggrhxumiwdl.supabase.co",
   supabaseAnonKey: "sb_publishable_zo4Vdwq349r56YVFls5LRw_ff1Mx9G_",
-  redirectUrl: window.location.origin,
+  redirectUrl: window.location.origin + window.location.pathname,
+};
+
+const GOOGLE_SCOPE = "https://www.googleapis.com/auth/calendar.readonly";
+const SYNC_WEEKS = 4;
+const STORAGE = {
+  cache: (slug) => `gatherly-workspace:${slug}`,
+  member: "gatherly-member-id",
+  profile: "gatherly-profile",
+  sources: "gatherly-calendar-sources",
+  seen: (slug) => `gatherly-activity-seen:${slug}`,
+  googleToken: "gatherly-google-token",
 };
 
 const supabaseClient = AUTH_CONFIG.configured && window.supabase
   ? window.supabase.createClient(AUTH_CONFIG.supabaseUrl, AUTH_CONFIG.supabaseAnonKey)
   : null;
-const toast = document.getElementById("toast");
-let workspaceState = null;
-let currentUser = null;
 
-const sampleState = {
-  privacy: "busy",
-  members: [
-    { name: "Jamie Miller", initials: "JM", status: "All set", updated: "12m ago" },
-    { name: "Taylor Kim", initials: "TK", status: "All set", updated: "1h ago" },
-    { name: "Riley Lee", initials: "RL", status: "Needs update", updated: "yesterday" },
-  ],
-  ideas: [
-    { title: "Slow morning brunch", description: "Good coffee, no rush, extra syrup.", votes: 4 },
-    { title: "Picnic in the park", description: "Fresh air and a blanket in the sun.", votes: 2 },
-    { title: "Games night", description: "Bring your best strategy and snacks.", votes: 3 },
-  ],
+const $ = (id) => document.getElementById(id);
+
+/* ------------------------------------------------------------- storage */
+
+function readJson(key, fallback) {
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeJson(key, value) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* Private browsing or a full quota: the app still works for this session. */
+  }
+}
+
+/* --------------------------------------------------------------- state */
+
+const slug = slugify(new URLSearchParams(window.location.search).get("w") || "weekend-crew");
+
+const session = {
+  slug,
+  state: normalizeWorkspaceState(readJson(STORAGE.cache(slug), null) || createDemoState()),
+  rev: null,
+  persisted: false,
+  offline: true,
 };
 
+const ui = {
+  weekOffset: 0,
+  view: "group",
+  selectedWindow: null,
+  selectedSlot: null,
+  paint: null,
+  editingIdeaId: null,
+  saving: false,
+  user: null,
+};
+
+let profile = {
+  name: "",
+  photo: "",
+  shareSchedule: true,
+  ...readJson(STORAGE.profile, {}),
+};
+
+let memberId = window.localStorage.getItem(STORAGE.member) || createId("member");
+window.localStorage.setItem(STORAGE.member, memberId);
+
+let calendarSources = readJson(STORAGE.sources, []);
+
+const friendStore = supabaseClient ? createFriendStore(supabaseClient) : null;
+const friends = { rows: [], profiles: {}, loaded: false, busy: false };
+
+let demoNoticeShown = false;
+const noteDemoMode = () => {
+  if (demoNoticeShown) return;
+  demoNoticeShown = true;
+  showToast(session.offline
+    ? "Working offline — changes stay on this device."
+    : "Demo mode: add the database keys to share this workspace.");
+};
+
+const toastElement = $("toast");
 const showToast = (message) => {
-  toast.textContent = message;
-  toast.classList.add("show");
+  toastElement.textContent = message;
+  toastElement.classList.add("show");
   window.clearTimeout(showToast.timer);
-  showToast.timer = window.setTimeout(() => toast.classList.remove("show"), 2600);
+  showToast.timer = window.setTimeout(() => toastElement.classList.remove("show"), 3200);
 };
+
+/* ------------------------------------------------------ week + helpers */
+
+const settings = () => session.state.settings;
+
+function currentWeek() {
+  const base = startOfWeek(addDays(new Date(), ui.weekOffset * 7), settings().weekStartsOn);
+  return buildWeek(base, { today: new Date() });
+}
+
+const currentSlots = () => buildSlots({ dayStart: settings().dayStart, dayEnd: settings().dayEnd });
+
+const me = () => session.state.members.find((member) => member.id === memberId) || null;
+
+const displayName = () => profile.name || ui.user?.user_metadata?.full_name || ui.user?.user_metadata?.name || "You";
+
+function windowsForWeek(week = currentWeek()) {
+  return findOpenWindows(session.state.members, week, currentSlots(), { minHours: settings().minWindowHours });
+}
+
+/* ------------------------------------------------------------ persistence */
+
+async function accessToken() {
+  if (!supabaseClient) return null;
+  const { data } = await supabaseClient.auth.getSession();
+  return data.session?.access_token || null;
+}
 
 async function loadWorkspace() {
-  const localState = window.localStorage.getItem("gatherly-workspace");
-  if (localState) {
-    try {
-      workspaceState = JSON.parse(localState);
-      applyWorkspaceState();
-    } catch {
-      window.localStorage.removeItem("gatherly-workspace");
-    }
-  }
+  const cached = readJson(STORAGE.cache(session.slug), null);
   try {
-    const response = await fetch("/api/workspace?slug=weekend-crew");
-    if (!response.ok) throw new Error("Workspace unavailable");
-    workspaceState = await response.json();
-    applyWorkspaceState();
+    const response = await fetch(`/api/workspace?slug=${encodeURIComponent(session.slug)}`, { headers: { Accept: "application/json" } });
+    if (!response.ok) throw new Error(String(response.status));
+    const payload = await response.json();
+    session.rev = payload.rev || null;
+    session.persisted = payload.persisted === true;
+    session.offline = false;
+    if (session.persisted) {
+      session.state = normalizeWorkspaceState(payload.state);
+      writeJson(STORAGE.cache(session.slug), session.state);
+    } else if (!cached) {
+      // Nothing saved here yet, so start from the sample workspace.
+      session.state = normalizeWorkspaceState(payload.state);
+    }
   } catch {
-    workspaceState = workspaceState || structuredClone(sampleState);
-    applyWorkspaceState();
-    showToast("Demo mode: connect the backend to sync this workspace.");
+    session.offline = true;
+    session.persisted = false;
   }
+  await ensureMembership();
+  render();
+  if (!session.persisted) noteDemoMode();
 }
 
-async function saveWorkspace() {
-  try {
-    const response = await fetch("/api/workspace?slug=weekend-crew", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(workspaceState),
-    });
-    if (!response.ok) throw new Error("Save failed");
-    workspaceState = await response.json();
-    return true;
-  } catch {
-    window.localStorage.setItem("gatherly-workspace", JSON.stringify(workspaceState));
-    showToast("Saved on this device; connect the backend to sync with friends.");
+/**
+ * Applies a change, shows it immediately, then saves. `apply` runs again
+ * against fresh server state if somebody else saved first, so a lost race
+ * re-applies the same edit instead of clobbering their work.
+ *
+ * Calls are queued: without that, a second edit made while the first is still
+ * in flight could be undone on screen when the first reply lands.
+ */
+let saveQueue = Promise.resolve();
+
+function mutate(apply, options) {
+  const next = saveQueue.then(() => applyAndSave(apply, options), () => applyAndSave(apply, options));
+  saveQueue = next.catch(() => {});
+  return next;
+}
+
+async function applyAndSave(apply, { note } = {}) {
+  const draft = structuredClone(session.state);
+  apply(draft, session.state);
+  if (note) draft.activity = [{ message: note, at: new Date().toISOString() }, ...(draft.activity || [])];
+  session.state = normalizeWorkspaceState(draft);
+  ui.saving = true;
+  render();
+  writeJson(STORAGE.cache(session.slug), session.state);
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const token = await accessToken();
+    let response;
+    try {
+      response = await fetch(`/api/workspace?slug=${encodeURIComponent(session.slug)}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ state: session.state, rev: session.rev }),
+      });
+    } catch {
+      ui.saving = false;
+      session.offline = true;
+      render();
+      showToast("Saved on this device — no connection to your group right now.");
+      return false;
+    }
+
+    const payload = await response.json().catch(() => ({}));
+
+    if (response.ok || response.status === 201) {
+      session.rev = payload.rev || null;
+      session.persisted = payload.persisted === true;
+      session.offline = false;
+      ui.saving = false;
+      if (session.persisted) {
+        session.state = normalizeWorkspaceState(payload.state);
+        writeJson(STORAGE.cache(session.slug), session.state);
+      }
+      render();
+      if (!session.persisted) noteDemoMode();
+      return session.persisted;
+    }
+
+    if (response.status === 409 && payload.state) {
+      // Somebody else saved first: rebase this edit onto their version.
+      const rebased = normalizeWorkspaceState(payload.state);
+      session.rev = payload.rev || null;
+      const next = structuredClone(rebased);
+      apply(next, rebased);
+      if (note) next.activity = [{ message: note, at: new Date().toISOString() }, ...(next.activity || [])];
+      session.state = normalizeWorkspaceState(next);
+      render();
+      continue;
+    }
+
+    ui.saving = false;
+    if (response.status === 403) {
+      session.state = payload.state ? normalizeWorkspaceState(payload.state) : session.state;
+      session.rev = payload.rev || session.rev;
+      render();
+      showToast(payload.error || "This workspace only accepts edits from signed-in members.");
+      return false;
+    }
+    session.offline = true;
+    render();
+    showToast(payload.error || "Could not save to your group — kept on this device.");
     return false;
   }
+
+  ui.saving = false;
+  showToast("Your group is busy saving right now. Try that again in a moment.");
+  return false;
 }
 
-function applyWorkspaceState() {
-  document.querySelectorAll(".person-card:not(.add-person)").forEach((card, index) => {
-    const member = workspaceState.members?.[index];
-    if (!member) return;
-    const text = card.querySelectorAll("strong, small, .person-status");
-    text[0].textContent = member.name;
-    text[1].textContent = `Updated ${member.updated}`;
-    text[2].textContent = member.status === "All set" ? "✓ All set" : member.status;
-  });
-  document.querySelectorAll(".idea-card").forEach((card, index) => {
-    const idea = workspaceState.ideas?.[index];
-    if (!idea) return;
-    card.querySelector("h3").textContent = idea.title;
-    card.querySelector(".idea-content p").textContent = idea.description;
-    card.querySelector(".idea-meta span:last-child").textContent = `♡ ${idea.votes} votes`;
-  });
-  document.getElementById("privacyStatus").textContent =
-    workspaceState.privacy === "details" ? "Event details shared" : "Busy / free only";
-}
+/**
+ * Makes sure exactly one member row represents the person at this browser.
+ * The decision is recomputed inside the save so that a retry after somebody
+ * else's edit still lands on the right row. See lib/membership.js.
+ */
+async function ensureMembership() {
+  const wantedName = profile.name || displayName();
+  const plan = resolveMembership({ members: session.state.members, localMemberId: memberId, user: ui.user });
+  const current = session.state.members.find((member) => member.id === plan.id);
 
-document.querySelectorAll("[data-scroll]").forEach((button) => {
-  button.addEventListener("click", () => document.getElementById(button.dataset.scroll)?.scrollIntoView({ behavior: "smooth" }));
-});
-
-const privacyDialog = document.getElementById("privacyDialog");
-const calendarDialog = document.getElementById("calendarDialog");
-const accountDialog = document.getElementById("accountDialog");
-const profileDialog = document.getElementById("profileDialog");
-const tentativePlanDialog = document.getElementById("tentativePlanDialog");
-const peopleDialog = document.getElementById("peopleDialog");
-document.getElementById("privacyButton").addEventListener("click", () => privacyDialog.showModal());
-document.getElementById("calendarButton").addEventListener("click", () => calendarDialog.showModal());
-document.querySelectorAll("#accountButton, #topAccountButton").forEach((button) => button.addEventListener("click", () => profileDialog.showModal()));
-document.querySelectorAll("#tentativePlanButton, #editTentativePlan").forEach((button) => button.addEventListener("click", () => tentativePlanDialog.showModal()));
-document.getElementById("managePeople").addEventListener("click", () => {
-  renderPeople();
-  peopleDialog.showModal();
-});
-document.querySelectorAll(".close-dialog").forEach((button) => button.addEventListener("click", () => button.closest("dialog").close()));
-
-const timingLabels = { week: "Looking for a time this week", month: "Looking for a time this month", later: "Looking for a time later", range: "" };
-const suggestedTimes = {
-  week: ["Tue, Sep 23 · 10:00 AM", "Wed, Sep 24 · 12:00 PM", "Fri, Sep 26 · 6:00 PM"],
-  month: ["Sat, Sep 27 · 11:00 AM", "Tue, Sep 30 · 6:00 PM", "Sat, Oct 4 · 12:00 PM"],
-  later: ["Sat, Oct 11 · 11:00 AM", "Sun, Oct 19 · 1:00 PM", "Sat, Nov 1 · 6:00 PM"],
-};
-const tentativePlanForm = document.getElementById("tentativePlanForm");
-const dateRangeFields = document.getElementById("dateRangeFields");
-const savedTentativePlan = JSON.parse(window.localStorage.getItem("gatherly-tentative-plan") || "null");
-const people = JSON.parse(window.localStorage.getItem("gatherly-people") || '{"friends":[],"groups":[]}');
-const renderPeople = () => {
-  const savedPeople = document.getElementById("savedPeople");
-  savedPeople.innerHTML = [...people.friends.map((friend) => `<div class="saved-person"><span class="saved-person-icon">•</span><span>${friend.name}</span><small>Friend</small></div>`), ...people.groups.map((group) => `<div class="saved-person"><span class="saved-person-icon">✣</span><span>${group}</span><small>Group</small></div>`)].join("") || "<p class=\"form-hint\">No additional friends or groups yet.</p>";
-  const audience = document.getElementById("planAudience");
-  audience.innerHTML = ["Weekend crew", ...people.friends.map((friend) => friend.name), ...people.groups].map((name) => `<option>${name}</option>`).join("");
-};
-document.querySelectorAll(".people-tab").forEach((tab) => tab.addEventListener("click", () => {
-  document.querySelectorAll(".people-tab").forEach((item) => item.classList.remove("active"));
-  tab.classList.add("active");
-  document.getElementById("friendForm").hidden = tab.dataset.peopleTab !== "friend";
-  document.getElementById("groupForm").hidden = tab.dataset.peopleTab !== "group";
-}));
-document.getElementById("friendForm").addEventListener("submit", (event) => {
-  event.preventDefault();
-  const friend = {
-    name: document.getElementById("friendName").value.trim(),
-    email: document.getElementById("friendEmail").value.trim(),
-  };
-  people.friends.push(friend);
-  window.localStorage.setItem("gatherly-people", JSON.stringify(people));
-  if (supabaseClient && currentUser && friend.email) {
-    supabaseClient.from("friend_invites").insert({
-      sender_id: currentUser.id,
-      recipient_email: friend.email,
-      note: `Join my Gatherly circle, ${friend.name}.`,
-    }).then(({ error }) => {
-      if (error) showToast("Friend saved locally; invite sync needs the database setup.");
-    });
+  const settled =
+    plan.action !== "create" &&
+    !plan.absorb &&
+    current &&
+    current.name === wantedName &&
+    current.sharesSchedule === profile.shareSchedule &&
+    !current.pending &&
+    (!ui.user || current.userId === ui.user.id);
+  if (settled) {
+    if (memberId !== current.id) rememberMemberId(current.id);
+    return;
   }
-  event.target.reset();
+
+  const joining = plan.action === "create";
+  let resolvedId = memberId;
+  await mutate(
+    (draft) => {
+      const fresh = resolveMembership({ members: draft.members, localMemberId: memberId, user: ui.user });
+      resolvedId = applyMembership(draft, fresh, {
+        user: ui.user,
+        name: wantedName,
+        sharesSchedule: profile.shareSchedule,
+        palettes: AVATAR_PALETTES,
+        createId: () => createId("member"),
+      }) || memberId;
+    },
+    joining ? { note: `${wantedName} joined` } : undefined
+  );
+  rememberMemberId(resolvedId);
+}
+
+function rememberMemberId(id) {
+  if (!id || id === memberId) return;
+  memberId = id;
+  window.localStorage.setItem(STORAGE.member, memberId);
+  // Which row is "you" changes what the whole page shows, so redraw.
+  render();
+}
+
+/** Lets somebody without an account say "that invite is me". */
+async function claimInvite(targetId) {
+  const plan = planManualClaim({ members: session.state.members, localMemberId: memberId, targetId });
+  if (!plan) return;
+  const name = profile.name || session.state.members.find((member) => member.id === targetId)?.name || displayName();
+  let resolvedId = memberId;
+  await mutate(
+    (draft) => {
+      const fresh = planManualClaim({ members: draft.members, localMemberId: memberId, targetId });
+      if (!fresh) return;
+      resolvedId = applyMembership(draft, fresh, {
+        user: ui.user,
+        name,
+        sharesSchedule: profile.shareSchedule,
+        palettes: AVATAR_PALETTES,
+        createId: () => createId("member"),
+      }) || memberId;
+    },
+    { note: `${name} joined` }
+  );
+  rememberMemberId(resolvedId);
+  profile = { ...profile, name };
+  writeJson(STORAGE.profile, profile);
+  renderSavedPeople();
+  showToast(`You're in as ${name}.`);
+}
+
+/* ------------------------------------------------------------ rendering */
+
+function render() {
+  renderChrome();
+  renderStatus();
+  renderPlan();
+  renderGrid();
   renderPeople();
-  showToast("Friend added to your circle.");
-});
-document.getElementById("groupForm").addEventListener("submit", (event) => {
-  event.preventDefault();
-  people.groups.push(document.getElementById("groupName").value.trim());
-  window.localStorage.setItem("gatherly-people", JSON.stringify(people));
-  event.target.reset();
-  renderPeople();
-  showToast("Friend group created.");
-});
-const profileForm = document.getElementById("profileForm");
-let savedProfile = JSON.parse(window.localStorage.getItem("gatherly-profile") || '{"name":"Alex Morgan","photo":"","shareSchedule":true}');
-const applyProfile = (profile) => {
-  document.getElementById("profileName").textContent = profile.name || "Alex Morgan";
-  document.getElementById("profileSubtitle").textContent = profile.shareSchedule ? "Availability shared" : "Private schedule";
-  document.getElementById("profileDisplayName").value = profile.name || "";
-  document.getElementById("profilePhotoUrl").value = profile.photo || "";
-  document.getElementById("profileShareSchedule").checked = profile.shareSchedule !== false;
-  const avatars = document.querySelectorAll(".profile-card .avatar, .account-avatar");
-  avatars.forEach((avatar) => {
-    avatar.textContent = profile.photo ? "" : (profile.name || "AM").split(" ").map((part) => part[0]).join("").slice(0, 2);
-    avatar.style.backgroundImage = profile.photo ? `url("${profile.photo}")` : "";
+  renderIdeas();
+  renderActivityBadge();
+}
+
+function renderChrome() {
+  $("workspaceName").textContent = session.state.name;
+  document.title = `${session.state.name} — Gatherly`;
+  $("todayStamp").textContent = formatDayStamp(new Date()).toUpperCase();
+  $("syncState").textContent = ui.saving ? "SAVING" : session.persisted ? "LIVE" : session.offline ? "OFFLINE" : "DEMO";
+  $("privacyStatus").textContent = session.state.privacy === "details" ? "Event details shared" : "Busy / free only";
+  $("profileName").textContent = displayName();
+  $("profileSubtitle").textContent = profile.shareSchedule ? "Availability shared" : "Private schedule";
+
+  const initials = initialsFor(displayName());
+  for (const avatar of document.querySelectorAll(".profile-card .avatar, .account-avatar")) {
+    avatar.textContent = profile.photo ? "" : initials;
+    const photo = safeImageUrl(profile.photo);
+    avatar.style.backgroundImage = photo ? `url("${photo}")` : "";
     avatar.style.backgroundSize = "cover";
-  });
-};
-applyProfile(savedProfile);
-profileForm.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const profile = {
-    name: document.getElementById("profileDisplayName").value.trim(),
-    photo: document.getElementById("profilePhotoUrl").value.trim(),
-    shareSchedule: document.getElementById("profileShareSchedule").checked,
-  };
-  window.localStorage.setItem("gatherly-profile", JSON.stringify(profile));
-  savedProfile = profile;
-  if (supabaseClient && currentUser) {
-    supabaseClient.from("profiles").upsert({
-      id: currentUser.id,
-      display_name: profile.name,
-      photo_url: profile.photo || null,
-      share_schedule: profile.shareSchedule,
-      updated_at: new Date().toISOString(),
-    }).then(({ error }) => {
-      if (error) showToast("Profile saved locally; database sync needs the schema setup.");
-    });
+    avatar.style.backgroundPosition = "center";
   }
-  applyProfile(profile);
-  profileDialog.close();
-  showToast("Profile saved. Friends will see your updated availability setting.");
+
+  const radio = document.querySelector(`input[name="privacy"][value="${session.state.privacy}"]`);
+  if (radio) {
+    radio.checked = true;
+    for (const option of document.querySelectorAll(".privacy-option")) {
+      option.classList.toggle("active", option.contains(radio));
+    }
+  }
+  $("shareScheduleToggle").checked = profile.shareSchedule;
+  $("profileShareSchedule").checked = profile.shareSchedule;
+}
+
+function renderStatus() {
+  const week = currentWeek();
+  const mine = me();
+  const sharedDays = mine ? week.filter((day) => isSharingOn(mine, day.date)).length : 0;
+  const hasAny = Boolean(mine && (mine.weekly.length || mine.busy.length));
+
+  $("ownStatus").textContent = !mine
+    ? "Joining…"
+    : !profile.shareSchedule
+      ? "Not shared"
+      : hasAny
+        ? sharedDays === week.length
+          ? "Ready to share"
+          : `${sharedDays} of ${week.length} days shared`
+        : "Add your times";
+  const icon = $("ownStatusIcon");
+  const ready = Boolean(mine && profile.shareSchedule && hasAny);
+  icon.textContent = ready ? "✓" : "＋";
+  icon.classList.toggle("green", ready);
+  icon.classList.toggle("yellow", !ready);
+
+  const windows = windowsForWeek(week);
+  $("weekScopeLabel").textContent = ui.weekOffset === 0 ? "THIS WEEK" : formatWeekLabel(week[0].date, week.length).toUpperCase();
+  $("overlapSummary").textContent = windows.length
+    ? `${windows.length} overlap${windows.length === 1 ? "" : "s"} found`
+    : "No shared window yet";
+
+  $("weekLabel").textContent = formatWeekLabel(week[0].date, week.length);
+  $("thisWeek").hidden = ui.weekOffset === 0;
+  $("peopleCount").textContent = `${session.state.members.length} ${session.state.members.length === 1 ? "PERSON" : "PEOPLE"}`;
+}
+
+function renderGrid() {
+  const grid = $("calendarGrid");
+  const week = currentWeek();
+  const slots = currentSlots();
+  const mine = me();
+  const isMineView = ui.view === "mine";
+
+  grid.setAttribute("aria-label", isMineView ? "Your availability" : "Group availability");
+  grid.style.gridTemplateColumns = `62px repeat(${week.length}, 1fr)`;
+  const cells = [`<div class="grid-corner">${timeZoneOffsetLabel()}</div>`];
+
+  for (const day of week) {
+    cells.push(
+      `<div class="day${day.isToday ? " today" : ""}${day.isWeekend ? " weekend" : ""}"><small>${day.label}</small><strong>${day.dayOfMonth}</strong>${day.isToday ? "<span>Today</span>" : ""}</div>`
+    );
+  }
+
+  for (const slot of slots) {
+    cells.push(`<div class="time-label">${slot.showLabel ? formatHour(slot.hour) : ""}</div>`);
+    for (const day of week) {
+      const cell = isMineView ? classifySlot(mine ? [mine] : [], day.date, slot.hour) : classifySlot(session.state.members, day.date, slot.hour);
+      const className = isMineView ? mineSlotClass(cell, mine) : cell.state;
+      const selected = ui.selectedSlot && ui.selectedSlot.iso === day.iso && ui.selectedSlot.hour === slot.hour;
+      cells.push(
+        `<div class="slot ${className}${selected ? " selected" : ""}" role="gridcell" tabindex="0"` +
+          ` data-iso="${day.iso}" data-hour="${slot.hour}"` +
+          ` aria-label="${escapeAttribute(slotLabel(day, slot, cell, isMineView))}"></div>`
+      );
+    }
+  }
+
+  grid.innerHTML = cells.join("");
+  grid.classList.toggle("editing", isMineView);
+  $("groupLegend").hidden = isMineView;
+  $("mineLegend").hidden = !isMineView;
+  $("editHint").hidden = !isMineView;
+  $("mineActions").hidden = !isMineView;
+  $("groupViewTab").classList.toggle("active", !isMineView);
+  $("mineViewTab").classList.toggle("active", isMineView);
+  $("groupViewTab").setAttribute("aria-selected", String(!isMineView));
+  $("mineViewTab").setAttribute("aria-selected", String(isMineView));
+
+  renderSelectedWindow(week);
+}
+
+/**
+ * Editing means "mark when you're busy", so a week you have not shared yet
+ * reads as free rather than as an unreadable block of hatching. The group view
+ * still treats it as unknown until you actually share something.
+ */
+function mineSlotClass(cell, mine) {
+  if (!mine) return "unknown";
+  if (cell.unknown.length) return "mine-free";
+  return cell.free.length ? "mine-free" : "mine-busy";
+}
+
+function slotLabel(day, slot, cell, isMineView) {
+  const when = `${day.longLabel} ${formatHour(slot.hour)}`;
+  if (isMineView) {
+    if (cell.unknown.length) return `${when}, free, not shared yet`;
+    return `${when}, you are ${cell.free.length ? "free" : "busy"}`;
+  }
+  if (cell.state === "overlap") return `${when}, everyone free`;
+  if (cell.state === "partial") return `${when}, ${cell.free.length} free, ${cell.busy.length} busy`;
+  return `${when}, no shared free time`;
+}
+
+function describeSlot(day, slot, cell) {
+  const when = `${day.longLabel}, ${formatHour(slot.hour)}`;
+  if (ui.view === "mine") {
+    if (cell.unknown.length) return `${when} — free, but this week is not shared with your group yet.`;
+    return `${when} — you are ${cell.free.length ? "free" : "busy"}.`;
+  }
+  const parts = [];
+  if (cell.free.length) parts.push(`Free: ${cell.free.map((member) => member.name).join(", ")}`);
+  if (cell.busy.length) {
+    const showDetails = session.state.privacy === "details";
+    parts.push(
+      `Busy: ${cell.busy
+        .map((entry) => (showDetails && entry.title ? `${entry.member.name} (${entry.title})` : entry.member.name))
+        .join(", ")}`
+    );
+  }
+  if (cell.unknown.length) parts.push(`No times yet: ${cell.unknown.map((member) => member.name).join(", ")}`);
+  return `${when} — ${parts.join(" · ") || "nobody has shared times yet."}`;
+}
+
+function renderSelectedWindow(week) {
+  const windows = windowsForWeek(week);
+  const chosen = ui.selectedWindow
+    ? windows.find((window) => window.start.getTime() === ui.selectedWindow) || windows[0]
+    : windows[0];
+  const container = $("selectedWindow");
+
+  if (!chosen || ui.view === "mine") {
+    container.hidden = true;
+    return;
+  }
+  container.hidden = false;
+  $("selectedWindowTitle").textContent = `${formatDayStamp(chosen.start)} · ${formatClock(chosen.start)} – ${formatClock(chosen.end)}`;
+  $("selectedWindowDetail").textContent = describeWindow(chosen, session.state.members.filter((member) => member.sharesSchedule !== false).length);
+}
+
+function renderPeople() {
+  const grid = $("peopleGrid");
+  const week = currentWeek();
+  const cards = session.state.members.map((member) => {
+    const isYou = member.id === memberId;
+    const sharedThisWeek = week.some((day) => isSharingOn(member, day.date));
+    const status = member.pending
+      ? "Waiting for times"
+      : member.sharesSchedule === false
+        ? "Schedule private"
+        : sharedThisWeek
+          ? "✓ All set"
+          : "Needs update";
+    const statusClass = status === "✓ All set" ? "person-status" : "person-status muted";
+    return `<article class="person-card${isYou ? " is-you" : ""}${member.pending ? " pending" : ""}">
+      ${isYou ? '<span class="person-badge">YOU</span>' : `<button class="card-remove" data-remove-member="${escapeAttribute(member.id)}" aria-label="Remove ${escapeAttribute(member.name)}">×</button>`}
+      <div class="person-top"><div class="avatar ${member.palette}">${escapeHtml(member.initials)}</div><span class="presence${sharedThisWeek ? "" : " away"}"></span></div>
+      <strong>${escapeHtml(member.name)}</strong>
+      <small>Updated ${escapeHtml(formatRelative(member.updatedAt))}</small>
+      <span class="${statusClass}">${escapeHtml(status)}</span>
+    </article>`;
+  });
+
+  cards.push(`<article class="person-card add-person" id="addPerson" role="button" tabindex="0"><div class="add-icon">＋</div><strong>Add someone</strong><small>Invite a friend to join</small></article>`);
+  grid.innerHTML = cards.join("");
+}
+
+function renderIdeas() {
+  const grid = $("ideaGrid");
+  const ideas = rankIdeas(session.state.ideas);
+  if (!ideas.length) {
+    grid.innerHTML = '<p class="empty-note">No ideas yet. Add the first one — anything from a walk to a weekend away.</p>';
+    return;
+  }
+  const top = voteCount(ideas[0]);
+  grid.innerHTML = ideas
+    .map((idea) => {
+      const style = IDEA_STYLES.find((entry) => entry.key === idea.style) || IDEA_STYLES[0];
+      const voted = hasVoted(idea, memberId);
+      const count = voteCount(idea);
+      const tag = idea.tag || (count && count === top ? "POPULAR" : "IDEA");
+      return `<article class="idea-card${count && count === top ? " selected-idea" : ""}">
+        <div class="idea-image ${style.key}"><span>${style.emoji}</span>
+          <button class="idea-edit" data-edit-idea="${escapeAttribute(idea.id)}" aria-label="Edit ${escapeAttribute(idea.title)}">✎</button>
+          <button class="heart${voted ? " voted" : ""}" data-vote-idea="${escapeAttribute(idea.id)}" aria-pressed="${voted}" aria-label="${voted ? "Remove your vote for" : "Vote for"} ${escapeAttribute(idea.title)}">${voted ? "♥" : "♡"}</button>
+        </div>
+        <div class="idea-content">
+          <span class="tag ${style.tagClass}">${escapeHtml(tag)}</span>
+          <h3>${escapeHtml(idea.title)}</h3>
+          <p>${escapeHtml(idea.description)}</p>
+          <div class="idea-meta"><span>⌖ ${escapeHtml(idea.location || "Anywhere")}</span><span>♡ ${count} vote${count === 1 ? "" : "s"}</span></div>
+        </div>
+      </article>`;
+    })
+    .join("");
+}
+
+function renderPlan() {
+  const plan = session.state.plan;
+  const section = $("tentativePlanSection");
+  if (!plan) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+  $("tentativeTitle").textContent = plan.location ? `${plan.activity} · ${plan.location}` : plan.activity;
+
+  const scope = planScopeLabel(plan);
+  $("tentativeTiming").textContent = plan.chosen
+    ? `Pencilled in for ${formatDayStamp(plan.chosen)} at ${formatClock(plan.chosen)} with ${plan.audience}`
+    : `${scope} with ${plan.audience}`;
+  $("tentativeBadge").textContent = plan.chosen ? "Pencilled in" : "Not confirmed";
+
+  const suggestions = suggestionsForPlan(plan);
+  $("tentativeSuggestions").innerHTML = suggestions.length
+    ? `<span>Suggested windows</span>${suggestions
+        .map((window) => `<button type="button" data-window="${window.start.getTime()}">${escapeHtml(formatWindow(window))}</button>`)
+        .join("")}`
+    : '<span>No shared window in that range yet — add more times or widen the search.</span>';
+}
+
+function planScopeLabel(plan) {
+  if (plan.timing === "range" && plan.start && plan.end) return `Looking between ${plan.start} and ${plan.end}`;
+  if (plan.timing === "month") return "Looking for a time this month";
+  if (plan.timing === "later") return "Looking for a time later";
+  return "Looking for a time this week";
+}
+
+/** Searches real availability over the plan's range instead of canned times. */
+function suggestionsForPlan(plan) {
+  const today = new Date();
+  let from = startOfWeek(today, settings().weekStartsOn);
+  let weeks = 1;
+  if (plan.timing === "month") weeks = 5;
+  else if (plan.timing === "later") {
+    from = addDays(from, 28);
+    weeks = 8;
+  } else if (plan.timing === "range" && plan.start && plan.end) {
+    from = startOfWeek(new Date(`${plan.start}T00:00:00`), settings().weekStartsOn);
+    const span = Math.ceil((new Date(`${plan.end}T23:59:59`) - from) / (7 * 24 * 3600 * 1000));
+    weeks = Math.min(12, Math.max(1, span));
+  }
+
+  const limits = plan.timing === "range" && plan.start && plan.end
+    ? { min: new Date(`${plan.start}T00:00:00`), max: new Date(`${plan.end}T23:59:59`) }
+    : null;
+
+  const found = [];
+  for (let index = 0; index < weeks && found.length < 3; index += 1) {
+    const week = buildWeek(addDays(from, index * 7), { today });
+    for (const window of windowsForWeek(week)) {
+      if (window.end < today) continue;
+      if (limits && (window.start < limits.min || window.start > limits.max)) continue;
+      found.push(window);
+      if (found.length >= 3) break;
+    }
+  }
+  return found;
+}
+
+/** Returns the block without its event title. */
+function withoutTitle(block) {
+  const copy = { ...block };
+  delete copy.title;
+  return copy;
+}
+
+function renderActivityBadge() {
+  const latest = session.state.activity[0];
+  const seen = window.localStorage.getItem(STORAGE.seen(session.slug));
+  $("activityDot").hidden = !latest || latest.at === seen;
+}
+
+/** Only http(s) image URLs are allowed into a CSS url() value. */
+function safeImageUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw, window.location.href);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
+    return parsed.href.replace(/["\\]/g, "");
+  } catch {
+    return "";
+  }
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
+}
+
+const escapeAttribute = escapeHtml;
+
+/* ------------------------------------------------------- availability edits */
+
+/**
+ * Makes the displayed week editable: the recurring "usual week" is copied into
+ * dated blocks once, so editing this week never rewrites every other week.
+ */
+function materializeMyWeek(draft, week) {
+  const member = draft.members.find((entry) => entry.id === memberId);
+  if (!member) return null;
+  const from = week[0].date;
+  const to = addDays(week[week.length - 1].date, 1);
+  const lastDay = week[week.length - 1].date;
+  const covered = member.coverage
+    && new Date(`${member.coverage.from}T00:00:00`) <= from
+    && new Date(`${member.coverage.to}T00:00:00`) >= lastDay;
+
+  if (!covered) {
+    const materialized = materializeWeek(member, week);
+    member.busy = replaceBusyRange(member.busy, materialized, { source: "manual", from, to });
+  }
+  member.coverage = widenCoverage(member.coverage, from, lastDay);
+  return member;
+}
+
+function applyPaint(cellsToPaint, busy) {
+  const week = currentWeek();
+  return mutate(
+    (draft) => {
+      const member = materializeMyWeek(draft, week);
+      if (!member) return;
+      for (const { iso, hour } of cellsToPaint) {
+        const day = new Date(`${iso}T00:00:00`);
+        const { start, end } = slotRange(day, hour);
+        // Drop anything overlapping the slot, then re-add it when marking busy.
+        member.busy = member.busy.filter((block) => !(new Date(block.start) < end && start < new Date(block.end)));
+        if (busy) member.busy.push({ start: start.toISOString(), end: end.toISOString(), source: "manual" });
+      }
+      member.updatedAt = new Date().toISOString();
+    },
+    { note: `${displayName()} updated their times` }
+  );
+}
+
+function slotFromEvent(event) {
+  const element = document.elementFromPoint(event.clientX, event.clientY);
+  const slot = element?.closest?.(".slot");
+  return slot && $("calendarGrid").contains(slot) ? slot : null;
+}
+
+function beginPaint(slot) {
+  const busy = !slot.classList.contains("mine-busy");
+  ui.paint = { busy, cells: new Map() };
+  extendPaint(slot);
+}
+
+function extendPaint(slot) {
+  if (!ui.paint) return;
+  const key = `${slot.dataset.iso}:${slot.dataset.hour}`;
+  if (ui.paint.cells.has(key)) return;
+  ui.paint.cells.set(key, { iso: slot.dataset.iso, hour: Number(slot.dataset.hour) });
+  slot.classList.toggle("mine-busy", ui.paint.busy);
+  slot.classList.toggle("mine-free", !ui.paint.busy);
+  slot.classList.remove("unknown");
+}
+
+function commitPaint() {
+  if (!ui.paint) return;
+  const { busy, cells } = ui.paint;
+  ui.paint = null;
+  if (!cells.size) return;
+  applyPaint([...cells.values()], busy);
+}
+
+/* --------------------------------------------------------- calendar sync */
+
+function saveSources() {
+  writeJson(STORAGE.sources, calendarSources);
+  renderSources();
+}
+
+function renderSources() {
+  const container = $("calendarSources");
+  if (!calendarSources.length) {
+    container.innerHTML = '<p class="form-hint">No calendar links yet. Busy times you paint by hand stay as they are.</p>';
+    return;
+  }
+  container.innerHTML = calendarSources
+    .map(
+      (source, index) => `<div class="source-row">
+        <div><strong>${escapeHtml(source.label || source.url)}</strong><small>${source.syncedAt ? `Synced ${escapeHtml(formatRelative(source.syncedAt))} · ${source.blocks || 0} busy blocks` : "Not synced yet"}</small></div>
+        <button type="button" data-remove-source="${index}" aria-label="Remove this calendar link">×</button>
+      </div>`
+    )
+    .join("");
+}
+
+function syncRange() {
+  const from = startOfWeek(new Date(), settings().weekStartsOn);
+  return { from, to: addDays(from, SYNC_WEEKS * 7) };
+}
+
+/** Writes imported busy blocks into my member row, replacing the last import. */
+async function storeImportedBlocks(blocks, source, range) {
+  const wantsDetails = session.state.privacy === "details";
+  const cleaned = blocks
+    .map((block) => ({
+      start: new Date(block.start),
+      end: new Date(block.end),
+      ...(wantsDetails && block.title ? { title: block.title } : {}),
+    }))
+    .filter((block) => !Number.isNaN(block.start.getTime()) && !Number.isNaN(block.end.getTime()) && block.end > block.start);
+
+  await mutate(
+    (draft) => {
+      const member = draft.members.find((entry) => entry.id === memberId);
+      if (!member) return;
+      member.busy = replaceBusyRange(member.busy, cleaned, { source, from: range.from, to: range.to });
+      member.coverage = widenCoverage(member.coverage, range.from, addDays(range.to, -1));
+      member.updatedAt = new Date().toISOString();
+    },
+    { note: `${displayName()} synced a calendar` }
+  );
+  return cleaned.length;
+}
+
+async function importIcs(url, { silent = false } = {}) {
+  const range = syncRange();
+  const response = await fetch("/api/calendar", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      url,
+      from: range.from.toISOString(),
+      to: range.to.toISOString(),
+      details: session.state.privacy === "details",
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (!silent) showToast(payload.error || "Could not read that calendar link.");
+    return null;
+  }
+  const count = await storeImportedBlocks(payload.blocks || [], "ics", range);
+  if (!silent) showToast(count ? `Imported ${count} busy block${count === 1 ? "" : "s"}.` : "That calendar has no events in the next four weeks.");
+  return count;
+}
+
+async function syncGoogle({ silent = false } = {}) {
+  const token = window.sessionStorage.getItem(STORAGE.googleToken);
+  if (!token) {
+    if (!silent) showToast("Connect Google Calendar first.");
+    return null;
+  }
+  const range = syncRange();
+  const params = new URLSearchParams({
+    timeMin: range.from.toISOString(),
+    timeMax: range.to.toISOString(),
+    singleEvents: "true",
+    orderBy: "startTime",
+    maxResults: "2500",
+  });
+  let payload;
+  try {
+    const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?${params}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (response.status === 401 || response.status === 403) {
+      window.sessionStorage.removeItem(STORAGE.googleToken);
+      renderGoogleState();
+      if (!silent) showToast("Google access expired — connect again to refresh busy times.");
+      return null;
+    }
+    if (!response.ok) throw new Error(String(response.status));
+    payload = await response.json();
+  } catch {
+    if (!silent) showToast("Could not reach Google Calendar.");
+    return null;
+  }
+
+  const blocks = (payload.items || [])
+    .filter((item) => item.status !== "cancelled" && item.transparency !== "transparent")
+    .map((item) => ({
+      start: item.start?.dateTime || (item.start?.date ? `${item.start.date}T00:00:00` : null),
+      end: item.end?.dateTime || (item.end?.date ? `${item.end.date}T00:00:00` : null),
+      title: item.summary,
+    }))
+    .filter((block) => block.start && block.end);
+
+  const count = await storeImportedBlocks(blocks, "google", range);
+  const source = calendarSources.find((entry) => entry.type === "google");
+  if (source) {
+    source.syncedAt = new Date().toISOString();
+    source.blocks = count;
+    saveSources();
+  }
+  if (!silent) showToast(count ? `Google Calendar synced: ${count} busy block${count === 1 ? "" : "s"}.` : "No Google events in the next four weeks.");
+  return count;
+}
+
+function renderGoogleState() {
+  const connected = Boolean(window.sessionStorage.getItem(STORAGE.googleToken));
+  const button = $("googleCalendarButton");
+  button.textContent = connected ? "Synced" : "Connect";
+  button.classList.toggle("connected", connected);
+  $("googleCalendarState").textContent = connected
+    ? "Connected for this browser session. Busy times refresh when you sync."
+    : "Sync busy times and show schedule overlaps.";
+}
+
+/* ------------------------------------------------------------- dialogs */
+
+const dialogs = {
+  privacy: $("privacyDialog"),
+  calendar: $("calendarDialog"),
+  account: $("accountDialog"),
+  profile: $("profileDialog"),
+  plan: $("tentativePlanDialog"),
+  people: $("peopleDialog"),
+  idea: $("ideaDialog"),
+  settings: $("settingsDialog"),
+  activity: $("activityDialog"),
+};
+
+const openDialog = (dialog) => {
+  if (typeof dialog.showModal === "function") dialog.showModal();
+  else dialog.setAttribute("open", "");
+};
+
+for (const button of document.querySelectorAll(".close-dialog")) {
+  button.addEventListener("click", () => button.closest("dialog").close());
+}
+
+for (const button of document.querySelectorAll("[data-scroll]")) {
+  button.addEventListener("click", () => $(button.dataset.scroll)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+}
+
+/* ------------------------------------------------------------ wiring */
+
+$("prevWeek").addEventListener("click", () => {
+  ui.weekOffset -= 1;
+  ui.selectedWindow = null;
+  ui.selectedSlot = null;
+  render();
 });
-document.getElementById("googleCalendarButton").addEventListener("click", async () => {
+$("nextWeek").addEventListener("click", () => {
+  ui.weekOffset += 1;
+  ui.selectedWindow = null;
+  ui.selectedSlot = null;
+  render();
+});
+$("thisWeek").addEventListener("click", () => {
+  ui.weekOffset = 0;
+  ui.selectedWindow = null;
+  render();
+});
+
+for (const tab of document.querySelectorAll(".view-tab")) {
+  tab.addEventListener("click", () => {
+    ui.view = tab.dataset.view;
+    $("slotDetail").textContent = "";
+    render();
+  });
+}
+
+$("editOwnAvailability").addEventListener("click", () => {
+  ui.view = "mine";
+  render();
+  $("availability").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+const grid = $("calendarGrid");
+
+grid.addEventListener("pointerdown", (event) => {
+  const slot = event.target.closest(".slot");
+  if (!slot) return;
+  if (ui.view === "mine") {
+    event.preventDefault();
+    beginPaint(slot);
+  } else {
+    selectSlot(slot);
+  }
+});
+
+grid.addEventListener("pointermove", (event) => {
+  if (!ui.paint) return;
+  const slot = slotFromEvent(event);
+  if (slot) extendPaint(slot);
+});
+
+window.addEventListener("pointerup", commitPaint);
+window.addEventListener("pointercancel", commitPaint);
+
+grid.addEventListener("mouseover", (event) => {
+  const slot = event.target.closest(".slot");
+  if (slot) describeSlotElement(slot);
+});
+
+grid.addEventListener("focusin", (event) => {
+  const slot = event.target.closest(".slot");
+  if (slot) describeSlotElement(slot);
+});
+
+grid.addEventListener("keydown", (event) => {
+  const slot = event.target.closest(".slot");
+  if (!slot) return;
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    if (ui.view === "mine") {
+      applyPaint([{ iso: slot.dataset.iso, hour: Number(slot.dataset.hour) }], !slot.classList.contains("mine-busy"));
+    } else {
+      selectSlot(slot);
+    }
+    return;
+  }
+  const moves = { ArrowLeft: -1, ArrowRight: 1 };
+  const columns = currentWeek().length;
+  const jumps = { ArrowUp: -columns, ArrowDown: columns };
+  const delta = moves[event.key] ?? jumps[event.key];
+  if (delta === undefined) return;
+  event.preventDefault();
+  const slots = [...grid.querySelectorAll(".slot")];
+  const next = slots[slots.indexOf(slot) + delta];
+  next?.focus();
+});
+
+function selectSlot(slot) {
+  ui.selectedSlot = { iso: slot.dataset.iso, hour: Number(slot.dataset.hour) };
+  for (const element of grid.querySelectorAll(".slot.selected")) element.classList.remove("selected");
+  slot.classList.add("selected");
+  describeSlotElement(slot);
+
+  const week = currentWeek();
+  const day = week.find((entry) => entry.iso === slot.dataset.iso);
+  if (day) {
+    const { start } = slotRange(day.date, Number(slot.dataset.hour));
+    const containing = windowsForWeek(week).find((window) => window.start <= start && start < window.end);
+    ui.selectedWindow = containing ? containing.start.getTime() : ui.selectedWindow;
+    renderSelectedWindow(week);
+  }
+}
+
+function describeSlotElement(slot) {
+  const week = currentWeek();
+  const day = week.find((entry) => entry.iso === slot.dataset.iso);
+  if (!day) return;
+  const hour = Number(slot.dataset.hour);
+  const mine = me();
+  const cell = ui.view === "mine" ? classifySlot(mine ? [mine] : [], day.date, hour) : classifySlot(session.state.members, day.date, hour);
+  $("slotDetail").textContent = describeSlot(day, { hour }, cell);
+}
+
+$("saveUsualWeek").addEventListener("click", async () => {
+  const week = currentWeek();
+  const mine = me();
+  if (!mine) return;
+  const blocks = materializeWeek(mine, week);
+  if (!blocks.length) {
+    showToast("Mark some busy time first, then save it as your usual week.");
+    return;
+  }
+  await mutate(
+    (draft) => {
+      const member = draft.members.find((entry) => entry.id === memberId);
+      if (!member) return;
+      member.weekly = blocks.map((block) => {
+        const start = new Date(block.start);
+        const end = new Date(block.end);
+        return {
+          weekday: start.getDay(),
+          start: `${String(start.getHours()).padStart(2, "0")}:${String(start.getMinutes()).padStart(2, "0")}`,
+          end: `${String(end.getHours()).padStart(2, "0")}:${String(end.getMinutes()).padStart(2, "0")}`,
+        };
+      });
+      member.updatedAt = new Date().toISOString();
+    },
+    { note: `${displayName()} saved a usual week` }
+  );
+  showToast("Saved. Weeks you have not edited now use this pattern.");
+});
+
+$("clearMyWeek").addEventListener("click", async () => {
+  const week = currentWeek();
+  await mutate(
+    (draft) => {
+      const member = draft.members.find((entry) => entry.id === memberId);
+      if (!member) return;
+      const from = week[0].date;
+      const to = addDays(week[week.length - 1].date, 1);
+      member.busy = replaceBusyRange(member.busy, [], { source: null, from, to });
+      member.coverage = widenCoverage(member.coverage, from, week[week.length - 1].date);
+      member.updatedAt = new Date().toISOString();
+    },
+    { note: `${displayName()} cleared a week` }
+  );
+  showToast("Shared — your group sees you as free all week.");
+});
+
+/* Sharing */
+
+function inviteUrl() {
+  const url = new URL(window.location.href);
+  url.search = session.slug === "weekend-crew" ? "" : `?w=${encodeURIComponent(session.slug)}`;
+  url.hash = "";
+  return url.toString();
+}
+
+async function copyText(value) {
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    // Clipboard access needs a secure context and permission; fall back to a
+    // selection the person can copy by hand.
+    const field = document.createElement("textarea");
+    field.value = value;
+    field.setAttribute("readonly", "");
+    field.style.position = "fixed";
+    field.style.opacity = "0";
+    document.body.append(field);
+    field.select();
+    let copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch {
+      copied = false;
+    }
+    field.remove();
+    return copied;
+  }
+}
+
+async function shareInvite(message) {
+  const link = inviteUrl();
+  if (await copyText(link)) showToast(`${message} Link copied.`);
+  else showToast(`${message} Copy this link: ${link}`);
+}
+
+$("inviteButton").addEventListener("click", () => {
+  $("inviteLink").value = inviteUrl();
+  renderSavedPeople();
+  openDialog(dialogs.people);
+  shareInvite("Anyone with this link can add their times.");
+});
+
+$("shareButton").addEventListener("click", () => shareInvite("Availability view shared."));
+$("copyInviteLink").addEventListener("click", () => shareInvite("Invite link ready."));
+
+$("planButton").addEventListener("click", () => {
+  $("ideas").scrollIntoView({ behavior: "smooth", block: "start" });
+  showToast("Good window — now pick something to do.");
+});
+
+/* Privacy */
+
+$("privacyButton").addEventListener("click", () => openDialog(dialogs.privacy));
+
+for (const option of document.querySelectorAll(".privacy-option")) {
+  option.addEventListener("click", () => {
+    for (const item of document.querySelectorAll(".privacy-option")) item.classList.remove("active");
+    option.classList.add("active");
+    option.querySelector("input").checked = true;
+  });
+}
+
+$("savePrivacy").addEventListener("click", async () => {
+  const detailed = document.querySelector('input[name="privacy"]:checked').value === "details";
+  await mutate(
+    (draft) => {
+      draft.privacy = detailed ? "details" : "busy";
+      if (!detailed) {
+        // Busy/free only is not just a display setting: drop the titles.
+        for (const member of draft.members) {
+          member.busy = member.busy.map(withoutTitle);
+          member.weekly = member.weekly.map(withoutTitle);
+        }
+      }
+    },
+    { note: detailed ? "Event details are now shared" : "Sharing set to busy/free only" }
+  );
+  dialogs.privacy.close();
+  showToast(detailed ? "Event names are shared with this group." : "Only busy/free blocks are shared.");
+});
+
+/* Calendar links */
+
+$("calendarButton").addEventListener("click", () => {
+  renderSources();
+  renderGoogleState();
+  openDialog(dialogs.calendar);
+});
+
+$("googleCalendarButton").addEventListener("click", async () => {
+  if (window.sessionStorage.getItem(STORAGE.googleToken)) {
+    await syncGoogle();
+    renderGoogleState();
+    return;
+  }
   if (!supabaseClient) {
-    showToast("Connect the backend to sync Google Calendar availability.");
+    showToast("Add the Supabase keys in app.js to connect Google Calendar.");
     return;
   }
   const { error } = await supabaseClient.auth.signInWithOAuth({
     provider: "google",
     options: {
-      redirectTo: `${window.location.origin}/?calendar=connected`,
-      queryParams: {
-        access_type: "offline",
-        prompt: "consent",
-        scope: "https://www.googleapis.com/auth/calendar.readonly",
-      },
+      redirectTo: `${AUTH_CONFIG.redirectUrl}${session.slug === "weekend-crew" ? "" : `?w=${encodeURIComponent(session.slug)}`}`,
+      scopes: GOOGLE_SCOPE,
+      queryParams: { access_type: "offline", prompt: "consent" },
     },
   });
-  if (error) showToast("Google Calendar connection could not start.");
+  if (error) showToast(`Google Calendar could not start: ${error.message}`);
 });
-document.getElementById("appleCalendarButton").addEventListener("click", () => showToast("Paste an iCloud read-only link in the next step."));
-document.getElementById("shareScheduleToggle").addEventListener("change", (event) => {
-  const profile = { ...savedProfile, shareSchedule: event.target.checked };
-  savedProfile = profile;
-  window.localStorage.setItem("gatherly-profile", JSON.stringify(profile));
-  if (supabaseClient && currentUser) {
-    supabaseClient.from("profiles").update({
-      share_schedule: profile.shareSchedule,
-      updated_at: new Date().toISOString(),
-    }).eq("id", currentUser.id);
-  }
-  applyProfile(profile);
-  showToast(event.target.checked ? "Friends can see your free/busy blocks." : "Your schedule is private.");
-});
-renderPeople();
-const renderTentativePlan = (plan) => {
-  if (!plan) return;
-  document.getElementById("tentativePlanSection").hidden = false;
-  document.getElementById("tentativeTitle").textContent = plan.location ? `${plan.activity} · ${plan.location}` : plan.activity;
-  document.getElementById("tentativeTiming").textContent = plan.timing === "range" ? `${plan.start} – ${plan.end}` : timingLabels[plan.timing];
-  const suggestions = plan.timing === "range" ? [`${plan.start} · 10:00 AM`, `${plan.end} · 12:00 PM`] : suggestedTimes[plan.timing];
-  document.getElementById("tentativeSuggestions").innerHTML = `<span>Suggested windows</span>${suggestions.map((suggestion) => `<button type="button">${suggestion}</button>`).join("")}`;
-};
-renderTentativePlan(savedTentativePlan);
-document.querySelectorAll('input[name="timing"]').forEach((input) => input.addEventListener("change", () => {
-  dateRangeFields.hidden = input.value !== "range";
-  document.getElementById("planStart").required = input.value === "range";
-  document.getElementById("planEnd").required = input.value === "range";
-}));
-tentativePlanForm.addEventListener("submit", (event) => {
+
+$("icsForm").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const formData = new FormData(tentativePlanForm);
-  const plan = Object.fromEntries(formData.entries());
-  window.localStorage.setItem("gatherly-tentative-plan", JSON.stringify(plan));
-  renderTentativePlan(plan);
-  tentativePlanDialog.close();
-  showToast("Tentative plan saved — we’ll look for a time.");
+  const field = $("icsUrl");
+  const url = field.value.trim();
+  if (!url) {
+    showToast("Paste a calendar link first.");
+    return;
+  }
+  const button = $("icsSubmit");
+  button.disabled = true;
+  button.textContent = "Importing…";
+  const count = await importIcs(url);
+  button.disabled = false;
+  button.textContent = "Import busy times";
+  if (count === null) return;
+
+  let host = url;
+  try {
+    host = new URL(url.replace(/^webcal:/i, "https:")).hostname;
+  } catch {
+    /* Keep the raw value as the label. */
+  }
+  const existing = calendarSources.find((source) => source.url === url);
+  const record = existing || { type: "ics", url, label: host };
+  record.syncedAt = new Date().toISOString();
+  record.blocks = count;
+  if (!existing) calendarSources.push(record);
+  saveSources();
+  field.value = "";
 });
 
-const googleSignInButton = document.getElementById("googleSignInButton");
-const updateAccount = (user) => {
-  currentUser = user || null;
-  const signedIn = Boolean(user);
-  const displayName = user?.user_metadata?.full_name || user?.user_metadata?.name || "Google account";
-  document.getElementById("accountStatus").textContent = signedIn ? "Signed in" : "Not signed in";
-  document.getElementById("accountStatusDetail").textContent = signedIn ? `${displayName} connected` : "Your local planner session is active.";
-  document.getElementById("profileName").textContent = signedIn ? displayName : "Alex Morgan";
-  document.getElementById("profileSubtitle").textContent = signedIn ? "Google account" : "Personal space";
-};
+$("calendarSources").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-remove-source]");
+  if (!button) return;
+  calendarSources.splice(Number(button.dataset.removeSource), 1);
+  saveSources();
+  showToast("Calendar link removed from this device.");
+});
 
-if (supabaseClient) {
-  supabaseClient.auth.getSession().then(async ({ data }) => {
-    updateAccount(data.session?.user);
-    if (data.session?.user) {
-      const { data: profile } = await supabaseClient.from("profiles").select("display_name, photo_url, share_schedule").eq("id", data.session.user.id).maybeSingle();
-      if (profile) {
-        savedProfile = { name: profile.display_name, photo: profile.photo_url || "", shareSchedule: profile.share_schedule };
-        window.localStorage.setItem("gatherly-profile", JSON.stringify(savedProfile));
-        applyProfile(savedProfile);
-      }
+$("syncCalendarButton").addEventListener("click", async () => {
+  const icsSources = calendarSources.filter((source) => source.type === "ics");
+  const hasGoogle = Boolean(window.sessionStorage.getItem(STORAGE.googleToken));
+  if (!icsSources.length && !hasGoogle) {
+    renderSources();
+    renderGoogleState();
+    openDialog(dialogs.calendar);
+    return;
+  }
+  const button = $("syncCalendarButton");
+  button.disabled = true;
+  button.textContent = "↻ Syncing…";
+  let total = 0;
+  if (hasGoogle) total += (await syncGoogle({ silent: true })) || 0;
+  for (const source of icsSources) {
+    const count = await importIcs(source.url, { silent: true });
+    if (count !== null) {
+      source.syncedAt = new Date().toISOString();
+      source.blocks = count;
+      total += count;
+    }
+  }
+  saveSources();
+  button.disabled = false;
+  button.textContent = "↻ Sync calendar";
+  showToast(`Synced ${total} busy block${total === 1 ? "" : "s"} for the next four weeks.`);
+});
+
+$("shareScheduleToggle").addEventListener("change", (event) => updateShareSchedule(event.target.checked));
+$("profileShareSchedule").addEventListener("change", (event) => updateShareSchedule(event.target.checked));
+
+async function updateShareSchedule(shared) {
+  profile = { ...profile, shareSchedule: shared };
+  writeJson(STORAGE.profile, profile);
+  await mutate((draft) => {
+    const member = draft.members.find((entry) => entry.id === memberId);
+    if (member) {
+      member.sharesSchedule = shared;
+      member.updatedAt = new Date().toISOString();
     }
   });
-  supabaseClient.auth.onAuthStateChange((_event, session) => updateAccount(session?.user));
+  showToast(shared ? "Friends can see your free/busy blocks." : "Your schedule is hidden from the group.");
 }
 
-googleSignInButton.addEventListener("click", async () => {
-  if (!AUTH_CONFIG.configured) {
-    document.getElementById("authNote").textContent = "Google sign-in is not connected yet. Add the Supabase URL and anon key, then wire the OAuth callback described in DEPLOY.md.";
+/* Profile and account */
+
+for (const button of [$("accountButton"), $("topAccountButton")]) {
+  button.addEventListener("click", () => {
+    $("profileDisplayName").value = profile.name || displayName();
+    $("profilePhotoUrl").value = profile.photo || "";
+    $("profilePhotoPreview").textContent = profile.photo ? "" : initialsFor(displayName());
+    $("profilePhotoPreview").style.backgroundImage = safeImageUrl(profile.photo) ? `url("${safeImageUrl(profile.photo)}")` : "";
+    openDialog(dialogs.profile);
+  });
+}
+
+$("openAccountFromProfile").addEventListener("click", () => {
+  dialogs.profile.close();
+  openDialog(dialogs.account);
+});
+
+$("profilePhotoUrl").addEventListener("input", (event) => {
+  const value = safeImageUrl(event.target.value);
+  $("profilePhotoPreview").style.backgroundImage = value ? `url("${value}")` : "";
+  $("profilePhotoPreview").textContent = value ? "" : initialsFor($("profileDisplayName").value || displayName());
+});
+
+$("profileForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const name = $("profileDisplayName").value.trim();
+  profile = {
+    ...profile,
+    name,
+    photo: $("profilePhotoUrl").value.trim(),
+    shareSchedule: $("profileShareSchedule").checked,
+  };
+  writeJson(STORAGE.profile, profile);
+
+  await mutate(
+    (draft) => {
+      const member = draft.members.find((entry) => entry.id === memberId);
+      if (!member) return;
+      member.name = name || member.name;
+      member.initials = initialsFor(name || member.name);
+      member.sharesSchedule = profile.shareSchedule;
+      member.updatedAt = new Date().toISOString();
+    },
+    { note: `${name || "Someone"} updated their profile` }
+  );
+
+  if (supabaseClient && ui.user) {
+    const { error } = await supabaseClient.from("profiles").upsert({
+      id: ui.user.id,
+      display_name: name || displayName(),
+      photo_url: profile.photo || null,
+      share_schedule: profile.shareSchedule,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) showToast("Profile saved. Run supabase/schema.sql to sync it to your account.");
+  }
+  dialogs.profile.close();
+  showToast("Profile saved.");
+});
+
+$("googleSignInButton").addEventListener("click", async () => {
+  if (!supabaseClient) {
+    $("authNote").textContent = "Add your Supabase URL and publishable key to AUTH_CONFIG in app.js, then follow DEPLOY.md.";
     showToast("Google sign-in needs provider credentials first.");
     return;
   }
-
   const { error } = await supabaseClient.auth.signInWithOAuth({
     provider: "google",
-    options: { redirectTo: AUTH_CONFIG.redirectUrl },
+    options: { redirectTo: `${AUTH_CONFIG.redirectUrl}${session.slug === "weekend-crew" ? "" : `?w=${encodeURIComponent(session.slug)}`}` },
   });
   if (error) {
-    document.getElementById("authNote").textContent = `Google sign-in could not start: ${error.message}`;
+    $("authNote").textContent = `Google sign-in could not start: ${error.message}`;
     showToast("Google sign-in could not start.");
   }
 });
 
-document.querySelectorAll(".privacy-option").forEach((option) => {
-  option.addEventListener("click", () => {
-    document.querySelectorAll(".privacy-option").forEach((item) => item.classList.remove("active"));
-    option.classList.add("active");
-    option.querySelector("input").checked = true;
+$("signOutButton").addEventListener("click", async () => {
+  if (!supabaseClient) return;
+  await supabaseClient.auth.signOut();
+  window.sessionStorage.removeItem(STORAGE.googleToken);
+  renderGoogleState();
+  showToast("Signed out on this device.");
+});
+
+function renderAccount(user) {
+  ui.user = user || null;
+  const signedIn = Boolean(user);
+  const name = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email || "Google account";
+  $("accountStatus").textContent = signedIn ? "Signed in" : "Not signed in";
+  $("accountStatusDetail").textContent = signedIn ? `${name} connected` : "Your local planner session is active.";
+  $("accountStatusDot").style.background = signedIn ? "#64cf8b" : "#aaa7b5";
+  $("googleSignInButton").hidden = signedIn;
+  $("signOutButton").hidden = !signedIn;
+  $("accountCopy").textContent = signedIn
+    ? "Your availability follows this account between devices."
+    : "Sign in to keep your groups and availability wherever you plan.";
+  $("authNote").textContent = signedIn
+    ? "Signed in with Google. Calendar access is only requested when you connect a calendar."
+    : "Signing in links this planner to your Google account so your name and availability follow you between devices.";
+  renderChrome();
+}
+
+/* Tentative plan */
+
+function openPlanDialog() {
+  const plan = session.state.plan;
+  const audience = $("planAudience");
+  audience.innerHTML = [session.state.name, ...session.state.members.map((member) => member.name)]
+    .map((name) => `<option${plan?.audience === name ? " selected" : ""}>${escapeHtml(name)}</option>`)
+    .join("");
+  $("planActivity").value = plan?.activity || "";
+  $("planLocation").value = plan?.location || "";
+  const timing = document.querySelector(`input[name="timing"][value="${plan?.timing || "week"}"]`);
+  if (timing) timing.checked = true;
+  $("planStart").value = plan?.start || "";
+  $("planEnd").value = plan?.end || "";
+  $("dateRangeFields").hidden = plan?.timing !== "range";
+  openDialog(dialogs.plan);
+}
+
+for (const button of [$("tentativePlanButton"), $("editTentativePlan")]) {
+  button.addEventListener("click", openPlanDialog);
+}
+
+for (const input of document.querySelectorAll('input[name="timing"]')) {
+  input.addEventListener("change", () => {
+    const isRange = input.value === "range";
+    $("dateRangeFields").hidden = !isRange;
+    $("planStart").required = isRange;
+    $("planEnd").required = isRange;
   });
-});
-document.getElementById("savePrivacy").addEventListener("click", () => {
-  const detailed = document.querySelector('input[name="privacy"]:checked').value === "details";
-  workspaceState.privacy = detailed ? "details" : "busy";
-  document.getElementById("privacyStatus").textContent = detailed ? "Event details shared" : "Busy / free only";
-  privacyDialog.close();
-  saveWorkspace().then(() => showToast(detailed ? "Your event details are now visible to the group." : "Privacy setting saved: busy / free only."));
-});
+}
 
-document.getElementById("inviteButton").addEventListener("click", () => showToast("Invite link copied to your clipboard."));
-document.getElementById("shareButton").addEventListener("click", () => showToast("Availability view link copied."));
-document.getElementById("planButton").addEventListener("click", () => {
-  document.getElementById("ideas").scrollIntoView({ behavior: "smooth" });
-  showToast("Great choice — pick an activity below.");
-});
-document.getElementById("addPerson").addEventListener("click", () => showToast("Invite link copied — send it to your friend."));
-document.getElementById("addIdea").addEventListener("click", () => showToast("Idea added — write a title and a little note."));
-document.querySelectorAll(".heart").forEach((heart) => heart.addEventListener("click", () => {
-  heart.textContent = heart.textContent === "♥" ? "♡" : "♥";
-  const ideaCard = heart.closest(".idea-card");
-  const ideaIndex = [...document.querySelectorAll(".idea-card")].indexOf(ideaCard);
-  if (workspaceState?.ideas?.[ideaIndex]) {
-    workspaceState.ideas[ideaIndex].votes = Math.max(0, workspaceState.ideas[ideaIndex].votes + (heart.textContent === "♥" ? 1 : -1));
-    ideaCard.querySelector(".idea-meta span:last-child").textContent = `♡ ${workspaceState.ideas[ideaIndex].votes} votes`;
-    saveWorkspace();
+$("tentativePlanForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  const plan = {
+    activity: String(form.get("activity") || "").trim(),
+    location: String(form.get("location") || "").trim(),
+    audience: String(form.get("audience") || session.state.name),
+    timing: String(form.get("timing") || "week"),
+    start: String(form.get("start") || ""),
+    end: String(form.get("end") || ""),
+    updatedAt: new Date().toISOString(),
+  };
+  if (plan.timing === "range" && plan.start && plan.end && plan.end < plan.start) {
+    showToast("The end of the range comes before the start.");
+    return;
   }
-  showToast(heart.textContent === "♥" ? "Added to your group’s ideas." : "Removed from your ideas.");
-}));
-document.querySelectorAll(".connect-button").forEach((button) => button.addEventListener("click", () => {
-  button.textContent = "Added";
-  button.classList.add("connected");
-  showToast("Calendar integration saved (demo).");
-}));
-document.querySelector(".mobile-menu").addEventListener("click", () => document.querySelector(".sidebar").classList.toggle("open"));
-document.querySelectorAll(".nav-item").forEach((item) => item.addEventListener("click", () => document.querySelector(".sidebar").classList.remove("open")));
-document.getElementById("settingsButton").addEventListener("click", () => showToast("Settings are coming next."));
-document.querySelectorAll(".slot").forEach((slot) => slot.addEventListener("click", () => {
-  document.querySelectorAll(".slot.selected").forEach((selected) => selected.classList.remove("selected"));
-  slot.classList.add("selected");
-  showToast(slot.classList.contains("overlap") ? "Everyone is free in this window." : "Not everyone is available here.");
-}));
+  await mutate((draft) => {
+    draft.plan = plan;
+  }, { note: `Tentative plan: ${plan.activity}` });
+  dialogs.plan.close();
+  showToast("Tentative plan saved — suggested windows are below.");
+});
 
-loadWorkspace();
+$("removeTentativePlan").addEventListener("click", async () => {
+  await mutate((draft) => {
+    draft.plan = null;
+  }, { note: "Tentative plan removed" });
+  showToast("Tentative plan removed.");
+});
+
+$("tentativeSuggestions").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-window]");
+  if (!button) return;
+  const chosen = new Date(Number(button.dataset.window));
+  await mutate((draft) => {
+    if (draft.plan) draft.plan.chosen = chosen.toISOString();
+  }, { note: `Pencilled in for ${formatDayStamp(chosen)} at ${formatClock(chosen)}` });
+  showToast(`Pencilled in for ${formatDayStamp(chosen)} at ${formatClock(chosen)}.`);
+});
+
+/* People */
+
+function renderSavedPeople() {
+  $("inviteLink").value = inviteUrl();
+  $("groupName").value = session.state.name;
+  $("savedPeople").innerHTML = session.state.members
+    .map(
+      (member) => `<div class="saved-person"><span class="saved-person-icon">•</span><span>${escapeHtml(member.name)}</span><small>${member.id === memberId ? "You" : member.pending ? "Invited" : "Sharing"}</small>${
+        member.id === memberId ? "" : `<button type="button" data-remove-member="${escapeAttribute(member.id)}" aria-label="Remove ${escapeAttribute(member.name)}">×</button>`
+      }</div>`
+    )
+    .join("");
+  renderClaimPrompt();
+  renderFriends();
+}
+
+/**
+ * Somebody who opened an invite link without an account can say which pending
+ * person they are, instead of adding themselves a second time.
+ */
+function renderClaimPrompt() {
+  const container = $("savedPeople");
+  const claimable = session.state.members.filter((member) => member.pending && member.id !== memberId);
+  const existing = container.parentElement.querySelector(".claim-row");
+  if (existing) existing.remove();
+  if (!claimable.length) return;
+
+  const row = document.createElement("div");
+  row.className = "claim-row";
+  row.innerHTML = `<span>Are you one of these people?</span>
+    <select class="text-input" id="claimTarget">${claimable
+      .map((member) => `<option value="${escapeAttribute(member.id)}">${escapeHtml(member.name)}</option>`)
+      .join("")}</select>
+    <button class="outline-button" type="button" id="claimInviteButton">That's me</button>`;
+  container.after(row);
+  $("claimInviteButton").addEventListener("click", () => claimInvite($("claimTarget").value));
+}
+
+/* ------------------------------------------------------------- friends */
+
+async function loadFriends({ force = false } = {}) {
+  if (!friendStore || !ui.user) {
+    friends.rows = [];
+    friends.profiles = {};
+    friends.loaded = false;
+    renderFriends();
+    return;
+  }
+  if (friends.loaded && !force) return;
+  const { data, error } = await friendStore.list();
+  if (error) {
+    friends.loaded = false;
+    renderFriends(error.message);
+    return;
+  }
+  friends.rows = data;
+  const { data: profiles } = await friendStore.profiles(profileIdsFor(data));
+  friends.profiles = profiles || {};
+  friends.loaded = true;
+  renderFriends();
+}
+
+function friendGroups() {
+  return partitionRequests(friends.rows, { userId: ui.user?.id, email: ui.user?.email });
+}
+
+function friendRowMarkup(row, actions) {
+  const party = describeParty(row, { userId: ui.user?.id, profiles: friends.profiles });
+  const photo = safeImageUrl(party.photo);
+  return `<div class="friend-row">
+    <div class="avatar avatar-lilac"${photo ? ` style="background-image:url(&quot;${escapeAttribute(photo)}&quot;);background-size:cover;background-position:center"` : ""}>${photo ? "" : escapeHtml(initialsFor(party.name))}</div>
+    <div><strong>${escapeHtml(party.name)}</strong><small>${escapeHtml(party.pendingSignup ? "Waiting for them to sign in" : party.email || "")}</small></div>
+    <div class="friend-actions">${actions}</div>
+  </div>`;
+}
+
+function renderFriends(errorMessage) {
+  const signedIn = Boolean(friendStore && ui.user);
+  $("friendsSignedOut").hidden = signedIn;
+  $("friendsSignedIn").hidden = !signedIn;
+  if (!signedIn) {
+    $("friendBadge").hidden = true;
+    return;
+  }
+
+  const { incoming, outgoing, friends: accepted } = friendGroups();
+
+  $("incomingSection").hidden = !incoming.length;
+  $("incomingList").innerHTML = incoming
+    .map((row) =>
+      friendRowMarkup(
+        row,
+        `<button type="button" class="accept" data-accept="${escapeAttribute(row.id)}">Accept</button><button type="button" class="quiet" data-decline="${escapeAttribute(row.id)}">Decline</button>`
+      )
+    )
+    .join("");
+
+  $("outgoingSection").hidden = !outgoing.length;
+  $("outgoingList").innerHTML = outgoing
+    .map((row) => friendRowMarkup(row, `<button type="button" class="quiet" data-withdraw="${escapeAttribute(row.id)}">Withdraw</button>`))
+    .join("");
+
+  $("friendList").innerHTML = accepted.length
+    ? accepted
+        .map((row) => {
+          const party = describeParty(row, { userId: ui.user?.id, profiles: friends.profiles });
+          const match = findMemberForParty(session.state.members, party);
+          // A row matched only by name is probably them, but nothing proves it
+          // yet — offer to link it rather than silently adding a second copy.
+          const linked = match && party.id && match.userId === party.id;
+          const action = linked
+            ? `<button type="button" disabled>In this group</button>`
+            : match
+              ? `<button type="button" data-add-friend="${escapeAttribute(row.id)}">Link to them</button>`
+              : `<button type="button" data-add-friend="${escapeAttribute(row.id)}">Add to group</button>`;
+          return friendRowMarkup(row, action);
+        })
+        .join("")
+    : `<p class="form-hint">${escapeHtml(errorMessage || "No friends yet. Send a request above, or just share the invite link.")}</p>`;
+
+  $("friendBadge").textContent = String(incoming.length);
+  $("friendBadge").hidden = incoming.length === 0;
+  $("friendsTab").textContent = incoming.length ? `Friends (${incoming.length})` : "Friends";
+}
+
+$("friendsSignInButton").addEventListener("click", () => {
+  dialogs.people.close();
+  openDialog(dialogs.account);
+});
+
+$("friendRequestForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!friendStore || !ui.user || friends.busy) return;
+  const field = $("friendRequestEmail");
+  const reason = rejectionFor(field.value, { email: ui.user.email, rows: friends.rows.filter((row) => row.requester_id === ui.user.id) });
+  if (reason) {
+    showToast(reason);
+    return;
+  }
+  friends.busy = true;
+  const button = $("sendFriendRequest");
+  button.disabled = true;
+  const { error } = await friendStore.send({
+    requesterId: ui.user.id,
+    email: field.value,
+    note: `${displayName()} wants to plan with you on Gatherly.`,
+  });
+  friends.busy = false;
+  button.disabled = false;
+  if (error) {
+    showToast(friendError(error));
+    return;
+  }
+  field.value = "";
+  await loadFriends({ force: true });
+  showToast("Friend request sent.");
+});
+
+function friendError(error) {
+  const message = String(error?.message || "");
+  if (/duplicate key|friend_requests_live_pair/i.test(message)) return "You already have a request waiting for them.";
+  if (/row-level security|permission/i.test(message)) return "Run supabase/schema.sql to enable friend requests.";
+  if (/relation .* does not exist|friend_requests/i.test(message)) return "Friend requests need the latest supabase/schema.sql.";
+  return "That did not go through. Try again in a moment.";
+}
+
+$("friendsPanel").addEventListener("click", async (event) => {
+  const target = event.target.closest("[data-accept], [data-decline], [data-withdraw], [data-add-friend]");
+  if (!target || !friendStore || !ui.user || friends.busy) return;
+  friends.busy = true;
+  target.disabled = true;
+
+  const { accept, decline, withdraw, addFriend } = target.dataset;
+  let error = null;
+  if (accept || decline) {
+    ({ error } = await friendStore.respond({ id: accept || decline, accept: Boolean(accept), userId: ui.user.id }));
+  } else if (withdraw) {
+    ({ error } = await friendStore.withdraw(withdraw));
+  } else if (addFriend) {
+    await addFriendToGroup(addFriend);
+  }
+
+  friends.busy = false;
+  if (error) {
+    target.disabled = false;
+    showToast(friendError(error));
+    return;
+  }
+  if (!addFriend) await loadFriends({ force: true });
+  if (accept) showToast("You're now friends.");
+  else if (decline) showToast("Request declined.");
+  else if (withdraw) showToast("Request withdrawn.");
+});
+
+/** Puts a friend in this workspace as a pending member they can claim. */
+async function addFriendToGroup(rowId) {
+  const row = friends.rows.find((entry) => entry.id === rowId);
+  if (!row) return;
+  const party = describeParty(row, { userId: ui.user?.id, profiles: friends.profiles });
+  const existing = findMemberForParty(session.state.members, party);
+  await mutate(
+    (draft) => {
+      const already = findMemberForParty(draft.members, party);
+      if (already) {
+        // Somebody already added them by hand: link that row to the account
+        // rather than leaving two copies of the same person in the group.
+        linkMemberToParty(already, party);
+        return;
+      }
+      draft.members.push({
+        id: createId("member"),
+        name: party.name,
+        initials: initialsFor(party.name),
+        palette: AVATAR_PALETTES[draft.members.length % AVATAR_PALETTES.length],
+        ...(party.id ? { userId: party.id } : {}),
+        ...(party.email ? { email: normalizeEmail(party.email) } : {}),
+        pending: true,
+        weekly: [],
+        busy: [],
+        updatedAt: new Date().toISOString(),
+      });
+    },
+    { note: `${party.name} was added` }
+  );
+  renderSavedPeople();
+  showToast(
+    existing
+      ? `${existing.name} was already here — now linked to their account.`
+      : `${party.name} added — they'll see this group when they sign in.`
+  );
+}
+
+$("managePeople").addEventListener("click", () => {
+  renderSavedPeople();
+  openDialog(dialogs.people);
+});
+
+for (const tab of document.querySelectorAll(".people-tab")) {
+  tab.addEventListener("click", () => {
+    for (const item of document.querySelectorAll(".people-tab")) item.classList.remove("active");
+    tab.classList.add("active");
+    $("friendForm").hidden = tab.dataset.peopleTab !== "friend";
+    $("friendsPanel").hidden = tab.dataset.peopleTab !== "friends";
+    $("groupForm").hidden = tab.dataset.peopleTab !== "group";
+    if (tab.dataset.peopleTab === "friends") loadFriends();
+  });
+}
+
+$("friendForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const name = $("friendName").value.trim();
+  const email = $("friendEmail").value.trim();
+  if (!name) return;
+  const clash = session.state.members.find(
+    (member) =>
+      member.name.toLowerCase() === name.toLowerCase() ||
+      (email && normalizeEmail(member.email) === normalizeEmail(email))
+  );
+  if (clash) {
+    showToast(`${clash.name} is already in this group.`);
+    return;
+  }
+  await mutate(
+    (draft) => {
+      draft.members.push({
+        id: createId("member"),
+        name,
+        initials: initialsFor(name),
+        palette: AVATAR_PALETTES[draft.members.length % AVATAR_PALETTES.length],
+        ...(email ? { email } : {}),
+        pending: true,
+        weekly: [],
+        busy: [],
+        updatedAt: new Date().toISOString(),
+      });
+    },
+    { note: `${name} was added` }
+  );
+  event.target.reset();
+  renderSavedPeople();
+  await shareInvite(`${name} added.`);
+});
+
+$("groupForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const name = $("groupName").value.trim();
+  if (!name) return;
+  await mutate((draft) => {
+    draft.name = name;
+  }, { note: `Group renamed to ${name}` });
+  renderSavedPeople();
+  showToast("Group name saved.");
+});
+
+async function removeMember(id) {
+  const member = session.state.members.find((entry) => entry.id === id);
+  if (!member || id === memberId) return;
+  await mutate(
+    (draft) => {
+      draft.members = draft.members.filter((entry) => entry.id !== id);
+      for (const idea of draft.ideas) idea.votes = idea.votes.filter((vote) => vote !== id);
+    },
+    { note: `${member.name} was removed` }
+  );
+  renderSavedPeople();
+  showToast(`${member.name} removed from this group.`);
+}
+
+$("savedPeople").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-remove-member]");
+  if (button) removeMember(button.dataset.removeMember);
+});
+
+$("peopleGrid").addEventListener("click", (event) => {
+  const remove = event.target.closest("[data-remove-member]");
+  if (remove) {
+    removeMember(remove.dataset.removeMember);
+    return;
+  }
+  if (event.target.closest("#addPerson")) {
+    renderSavedPeople();
+    openDialog(dialogs.people);
+  }
+});
+
+$("peopleGrid").addEventListener("keydown", (event) => {
+  if ((event.key === "Enter" || event.key === " ") && event.target.closest("#addPerson")) {
+    event.preventDefault();
+    renderSavedPeople();
+    openDialog(dialogs.people);
+  }
+});
+
+/* Ideas */
+
+function openIdeaDialog(idea) {
+  ui.editingIdeaId = idea?.id || null;
+  $("ideaDialogEyebrow").textContent = idea ? "EDIT IDEA" : "NEW IDEA";
+  $("ideaDialogTitle").textContent = idea ? "Tweak this idea." : "What sounds good?";
+  $("ideaTitle").value = idea?.title || "";
+  $("ideaDescription").value = idea?.description || "";
+  $("ideaLocation").value = idea?.location || "";
+  $("ideaTag").value = idea?.tag || "";
+  $("ideaStyle").innerHTML = IDEA_STYLES.map(
+    (style) => `<option value="${style.key}"${idea?.style === style.key ? " selected" : ""}>${style.emoji} ${style.key}</option>`
+  ).join("");
+  $("ideaSubmit").textContent = idea ? "Save idea" : "Add idea";
+  $("deleteIdea").hidden = !idea;
+  openDialog(dialogs.idea);
+}
+
+$("addIdea").addEventListener("click", () => openIdeaDialog(null));
+
+$("ideaForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const fields = {
+    title: $("ideaTitle").value.trim(),
+    description: $("ideaDescription").value.trim(),
+    location: $("ideaLocation").value.trim(),
+    tag: $("ideaTag").value.trim().toUpperCase(),
+    style: $("ideaStyle").value,
+  };
+  if (!fields.title) return;
+  const editingId = ui.editingIdeaId;
+  await mutate(
+    (draft) => {
+      if (editingId) {
+        const idea = draft.ideas.find((entry) => entry.id === editingId);
+        if (idea) Object.assign(idea, fields);
+        return;
+      }
+      draft.ideas.push({ ...fields, id: createId("idea"), votes: [memberId], createdAt: new Date().toISOString() });
+    },
+    { note: editingId ? `Idea updated: ${fields.title}` : `New idea: ${fields.title}` }
+  );
+  dialogs.idea.close();
+  showToast(editingId ? "Idea updated." : "Idea added — your vote is on it.");
+});
+
+$("deleteIdea").addEventListener("click", async () => {
+  const id = ui.editingIdeaId;
+  if (!id) return;
+  const idea = session.state.ideas.find((entry) => entry.id === id);
+  await mutate((draft) => {
+    draft.ideas = draft.ideas.filter((entry) => entry.id !== id);
+  }, { note: `Idea removed: ${idea?.title || ""}` });
+  dialogs.idea.close();
+  showToast("Idea removed.");
+});
+
+$("ideaGrid").addEventListener("click", async (event) => {
+  const edit = event.target.closest("[data-edit-idea]");
+  if (edit) {
+    openIdeaDialog(session.state.ideas.find((idea) => idea.id === edit.dataset.editIdea));
+    return;
+  }
+  const vote = event.target.closest("[data-vote-idea]");
+  if (!vote) return;
+  const id = vote.dataset.voteIdea;
+  const idea = session.state.ideas.find((entry) => entry.id === id);
+  const adding = !hasVoted(idea, memberId);
+  await mutate((draft) => {
+    const target = draft.ideas.find((entry) => entry.id === id);
+    if (!target) return;
+    target.votes = adding
+      ? [...new Set([...target.votes, memberId])]
+      : target.votes.filter((entry) => entry !== memberId);
+  });
+  showToast(adding ? "Vote added." : "Vote removed.");
+});
+
+/* Settings */
+
+const hourOptions = (selected) =>
+  Array.from({ length: 25 }, (_, hour) => `<option value="${hour}"${hour === selected ? " selected" : ""}>${hour === 24 ? "Midnight" : formatHour(hour)}</option>`).join("");
+
+$("settingsButton").addEventListener("click", () => {
+  const config = settings();
+  $("settingWorkspaceName").value = session.state.name;
+  $("settingWeekStart").value = String(config.weekStartsOn);
+  $("settingMinWindow").innerHTML = [1, 2, 3, 4, 6]
+    .map((hours) => `<option value="${hours}"${hours === config.minWindowHours ? " selected" : ""}>${hours} hour${hours === 1 ? "" : "s"}</option>`)
+    .join("");
+  $("settingDayStart").innerHTML = hourOptions(config.dayStart);
+  $("settingDayEnd").innerHTML = hourOptions(config.dayEnd);
+  $("settingLocked").checked = config.locked;
+  $("settingLocked").disabled = !ui.user;
+  $("lockHint").textContent = ui.user
+    ? "Locked workspaces accept edits from you and any signed-in member."
+    : "Sign in with Google first — locking needs an account so you do not lock yourself out.";
+  $("timezoneNote").textContent = `Times are shown in ${timeZoneLabel()} (${timeZoneOffsetLabel()}). Workspace link: ${inviteUrl()}`;
+  openDialog(dialogs.settings);
+});
+
+$("settingsForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const dayStart = Number($("settingDayStart").value);
+  const dayEnd = Number($("settingDayEnd").value);
+  if (dayEnd <= dayStart) {
+    showToast("The day has to end after it starts.");
+    return;
+  }
+  const name = $("settingWorkspaceName").value.trim() || session.state.name;
+  const locked = $("settingLocked").checked && Boolean(ui.user);
+  await mutate(
+    (draft) => {
+      draft.name = name;
+      draft.settings = {
+        weekStartsOn: Number($("settingWeekStart").value),
+        dayStart,
+        dayEnd,
+        minWindowHours: Number($("settingMinWindow").value),
+        locked,
+      };
+      if (locked && ui.user) {
+        draft.ownerId = draft.ownerId || ui.user.id;
+        const member = draft.members.find((entry) => entry.id === memberId);
+        if (member) member.userId = ui.user.id;
+      }
+    },
+    { note: "Settings updated" }
+  );
+  dialogs.settings.close();
+  showToast("Settings saved.");
+});
+
+$("exportWorkspace").addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify({ slug: session.slug, ...session.state }, null, 2)], { type: "application/json" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `${session.slug}-gatherly.json`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+  showToast("Workspace exported.");
+});
+
+$("resetLocal").addEventListener("click", () => {
+  for (const key of [STORAGE.cache(session.slug), STORAGE.member, STORAGE.profile, STORAGE.sources, STORAGE.seen(session.slug)]) {
+    window.localStorage.removeItem(key);
+  }
+  window.sessionStorage.removeItem(STORAGE.googleToken);
+  showToast("This device is reset. Reloading…");
+  window.setTimeout(() => window.location.reload(), 900);
+});
+
+/* Activity */
+
+$("activityButton").addEventListener("click", () => {
+  const entries = session.state.activity;
+  $("activityList").innerHTML = entries.length
+    ? entries
+        .map((entry) => `<div class="activity-row"><strong>${escapeHtml(entry.message)}</strong><small>${escapeHtml(formatRelative(entry.at))}</small></div>`)
+        .join("")
+    : '<p class="form-hint">Nothing has changed yet.</p>';
+  if (entries[0]) window.localStorage.setItem(STORAGE.seen(session.slug), entries[0].at);
+  renderActivityBadge();
+  openDialog(dialogs.activity);
+});
+
+/* Navigation chrome */
+
+$("mobileMenu").addEventListener("click", () => {
+  const open = $("sidebar").classList.toggle("open");
+  $("mobileMenu").setAttribute("aria-expanded", String(open));
+});
+
+for (const item of document.querySelectorAll(".nav-item")) {
+  item.addEventListener("click", () => {
+    $("sidebar").classList.remove("open");
+    if (!item.getAttribute("href")) return;
+    for (const link of document.querySelectorAll(".main-nav .nav-item")) link.classList.remove("active");
+    item.classList.add("active");
+  });
+}
+
+/* ------------------------------------------------------------- startup */
+
+let previousUserId = null;
+
+async function start() {
+  renderSources();
+  renderGoogleState();
+  render();
+
+  if (supabaseClient) {
+    const { data } = await supabaseClient.auth.getSession();
+    previousUserId = data.session?.user?.id || null;
+    captureProviderToken(data.session);
+    renderAccount(data.session?.user);
+    supabaseClient.auth.onAuthStateChange(async (_event, authSession) => {
+      const changed = (authSession?.user?.id || null) !== previousUserId;
+      previousUserId = authSession?.user?.id || null;
+      captureProviderToken(authSession);
+      renderAccount(authSession?.user);
+      renderGoogleState();
+      if (!changed) return;
+      // A new sign-in may mean an invite addressed to this person is waiting.
+      friends.loaded = false;
+      if (authSession?.user) {
+        await loadRemoteProfile(authSession.user);
+        await ensureMembership();
+        await loadFriends({ force: true });
+      } else {
+        renderFriends();
+      }
+    });
+    if (data.session?.user) await loadRemoteProfile(data.session.user);
+  } else {
+    renderAccount(null);
+  }
+
+  await loadWorkspace();
+  await loadFriends();
+
+  // Coming back from the Google consent screen: pull busy times straight away.
+  if (new URLSearchParams(window.location.search).has("calendar")) {
+    await syncGoogle();
+    renderGoogleState();
+  }
+}
+
+/**
+ * Supabase hands over the Google access token once, on the OAuth callback.
+ * Keeping it in sessionStorage means a refresh does not silently stop syncing;
+ * it is deliberately not written to localStorage or to the shared workspace.
+ */
+function captureProviderToken(authSession) {
+  if (authSession?.provider_token) {
+    try {
+      window.sessionStorage.setItem(STORAGE.googleToken, authSession.provider_token);
+    } catch {
+      /* Session storage unavailable: syncing still works until reload. */
+    }
+    if (!calendarSources.some((source) => source.type === "google")) {
+      calendarSources.push({ type: "google", label: "Google Calendar", url: "google" });
+      saveSources();
+    }
+  }
+}
+
+async function loadRemoteProfile(user) {
+  const { data, error } = await supabaseClient
+    .from("profiles")
+    .select("display_name, photo_url, share_schedule")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (error) return;
+  if (!data) {
+    // First sign-in on a project without the profile trigger: create the row
+    // so friend requests can show a name instead of an email address.
+    await supabaseClient.from("profiles").upsert({
+      id: user.id,
+      display_name: displayName(),
+      photo_url: profile.photo || null,
+      share_schedule: profile.shareSchedule,
+      updated_at: new Date().toISOString(),
+    });
+    return;
+  }
+  profile = {
+    ...profile,
+    name: data.display_name || profile.name,
+    photo: data.photo_url || profile.photo,
+    shareSchedule: data.share_schedule !== false,
+  };
+  writeJson(STORAGE.profile, profile);
+  renderChrome();
+}
+
+start();

@@ -1,78 +1,146 @@
-# Deploy Hangout Planner
+# Deploy Gatherly
 
-Hangout Planner has no frontend build step, but it now uses a small serverless API for shared workspace state. Deploy the project folder as-is, with `index.html` at the site root.
+Gatherly has no build step. Deploy the project folder as-is, with `index.html`
+at the site root. It works immediately in demo mode; the steps below turn it
+into a shared planner.
 
-## Connect persistence
+## 1. Connect the database
 
-1. Create a Supabase project.
-2. Open [`supabase/schema.sql`](supabase/schema.sql) on GitHub, click **Raw**, copy the SQL contents, paste the contents into a new Supabase SQL Editor query, and click **Run**. Do not paste the filename or path itself (`supabase/schema.sql`) into the editor; that is not SQL.
-3. Add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` as server-side environment variables in your host. Copy the names from [`.env.example`](.env.example); never expose the service-role key in browser code.
-4. Redeploy. Without these variables, the UI intentionally falls back to demo data and does not persist changes between visitors.
+Without this, the app shows a sample workspace and keeps changes on each
+visitor's own device. Nothing is shared between people.
 
-The schema also includes profiles (display name, photo URL, and schedule visibility), friend requests, and calendar connection records. Google Calendar OAuth still requires enabling the Google provider and Calendar scope in Supabase; the UI deliberately explains that requirement instead of pretending a calendar was connected. The current prototype keeps profile edits and friend invites in local storage until the signed-in Supabase user flow is connected to those tables.
+1. Create a [Supabase](https://supabase.com) project.
+2. Open [`supabase/schema.sql`](supabase/schema.sql), click **Raw**, and copy
+   the SQL. Paste the SQL itself into a new query in the Supabase SQL editor and
+   click **Run** — paste the file's contents, not its path.
+3. Give the host the project URL and the service-role key, either way:
+   - **Supabase → Settings → Integrations → Install Vercel integration.** It
+     provisions the variables itself (`NEXT_PUBLIC_SUPABASE_URL`,
+     `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_SECRET_KEY` and others).
+   - **Or by hand**, using the names in [`.env.example`](.env.example):
+     `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (Settings → API Keys).
 
-## Vercel
+   `api/workspace.js` accepts either naming. Note that Vercel cannot rename an
+   existing variable and will not reveal a secret's value, so correcting a
+   wrongly-named one means deleting it and adding a new one.
+4. Redeploy. Variables only apply to the environments they are scoped to, so
+   scope them to Preview as well if you want preview URLs to persist too.
 
-1. Push this folder to a Git provider, or run `vercel` from the project directory.
-2. In Vercel, import the repository and choose the project root.
-3. Leave **Framework Preset** as **Other**, leave **Build Command** blank, and leave **Output Directory** blank.
-4. Deploy. The included `vercel.json` enables clean URLs without changing the app's design.
+The service-role key must stay server-side. It is only read by `api/workspace.js`;
+never put it in `app.js` or any other file the browser downloads. The
+`workspaces` table has row level security on with no policy, so that key is the
+only way in, and the API validates and size-limits every write before it lands.
 
-## Netlify
+To confirm it worked, open the site: the header next to the date reads `LIVE`
+rather than `DEMO`, and a change made in one browser shows up in another.
 
-### From a Git repository
+## 2. Google sign-in (optional)
 
-1. Choose **Add new site → Import an existing project**.
-2. Select the repository and set **Publish directory** to `.`.
-3. Leave **Build command** empty, then deploy.
+Sign-in is not required — a workspace link works for people who never sign in.
+It carries a person's profile between devices and enables workspace locking.
 
-### Manual upload
-
-1. Open Netlify's deploy page.
-2. Drag the project folder into the deploy area.
-3. Netlify serves `index.html` automatically. The included `api/workspace.js` is Vercel-style; to make shared persistence work on Netlify, move that handler to a Netlify Function and update the browser endpoint. Otherwise, this app uses device-local fallback storage.
-
-## GitHub Pages
-
-1. Push the project files to a GitHub repository.
-2. Open **Settings → Pages**.
-3. Under **Build and deployment**, choose **Deploy from a branch**, select the publishing branch, and choose the `/ (root)` folder.
-4. Save and wait for the Pages URL to appear.
-
-GitHub Pages can host the frontend only. It cannot run the included serverless API, so it will use device-local fallback storage unless you host the API separately and update its URL in `app.js`. No rewrite configuration is required for the current hash routes.
-
-## Google sign-in setup
-
-The account entry point and **Continue with Google** action are present, but Google OAuth is intentionally not enabled in this repository. `app.js` contains the small `AUTH_CONFIG` section and currently keeps `configured: false`; clicking the action explains that credentials are missing instead of pretending that a user signed in.
-
-For a static site or Vercel deployment, [Supabase Auth](https://supabase.com/docs/guides/auth/social-login/auth-google) is the recommended next step:
-
-1. Create a Supabase project and copy its **Project URL** and **anon public key**.
-2. In Supabase Authentication → Providers → Google, add the Google OAuth **Client ID** and **Client Secret** from Google Cloud Console. Add the deployed site URL to Supabase's redirect allow list.
-3. The static page already loads the Supabase browser client from jsDelivr and `app.js` already wires `supabase.auth.signInWithOAuth({ provider: "google", options: { redirectTo: window.location.origin } })` plus session updates to the existing account UI.
-4. Replace the placeholder values in `AUTH_CONFIG` with:
+1. In Google Cloud Console, create an OAuth client and copy its **Client ID**
+   and **Client Secret**.
+2. In Supabase → Authentication → Providers → Google, paste both, and add your
+   deployed URL to the redirect allow list.
+3. In [`app.js`](app.js), set `AUTH_CONFIG` to your project:
 
    ```js
    const AUTH_CONFIG = {
      provider: "supabase",
      configured: true,
      supabaseUrl: "https://<project-ref>.supabase.co",
-     supabaseAnonKey: "<supabase-anon-public-key>",
-     redirectUrl: window.location.origin,
+     supabaseAnonKey: "<publishable / anon key>",
+     redirectUrl: window.location.origin + window.location.pathname,
    };
    ```
 
-   For Vercel, store the same values as `SUPABASE_URL` and `SUPABASE_ANON_KEY` environment variables and expose them through the static build/config step. Never put a Supabase service-role key or Google client secret in browser code.
-5. Subscribe to `supabase.auth.onAuthStateChange` and update the account dialog/profile from the returned session. Keep the signed-out state as the fallback when there is no session.
+   The publishable (anon) key is designed to be in browser code; the
+   service-role key is not. Only ever put the publishable one here.
 
-The current app has no Supabase client, OAuth callback, backend session, or real Google credential. Until those steps are completed, the rest of the planner remains a local visual prototype and no account data is persisted remotely.
+## 3. Friend requests (optional)
+
+Friend requests ride on the same accounts as sign-in and need no extra
+configuration — just the `friend_requests` table, which is in
+`supabase/schema.sql` from step 1. If you ran an earlier version of the schema,
+run it again; every statement is safe to repeat.
+
+To confirm the policies are doing their job, run
+[`supabase/rls-test.sql`](supabase/rls-test.sql) in the SQL editor. It creates
+throwaway accounts inside a transaction, tries every way one account might
+reach another's requests, prints a pass/fail row for each, and rolls back.
+
+Three things worth knowing about how it is secured:
+
+- A request is addressed to an **email**, so you can invite somebody who has
+  not signed up yet. The read policy therefore matches on the email inside the
+  caller's own token, which means nobody can read requests by guessing at
+  someone else's address.
+- Only the recipient can accept or decline.
+- A policy cannot compare against the old row, so "answering cannot rewrite who
+  the request was from" is enforced with column privileges: a signed-in caller
+  may only update `status`, `recipient_id` and `responded_at`. Without that, a
+  recipient could accept a request and restate it as coming from somebody else,
+  inventing a friendship that person would then see in their own list.
+
+The schema also adds a trigger that creates a `profiles` row for every new
+account, so requests show a name rather than a bare email address. Nobody is
+emailed: a request waits in the app until the recipient next signs in.
+
+## 4. Google Calendar import (optional)
+
+Add the Calendar scope `https://www.googleapis.com/auth/calendar.readonly` to
+the same Google OAuth client. Gatherly requests it only when somebody clicks
+**Connect** under Calendar links, and only ever reads.
+
+Supabase returns the Google access token once, on the sign-in callback, so the
+connection lasts for that browser session. Gatherly keeps that token in
+`sessionStorage` — never in local storage, and never in the shared workspace.
+
+ICS links (iCloud, Outlook, Google's secret address) need no setup at all.
+`api/calendar.js` fetches them server-side because calendar feeds do not allow
+direct browser requests. That handler only follows `https`, re-checks every
+redirect, and refuses hosts that resolve to private or loopback addresses so
+the URL box cannot be used to probe your own network.
+
+## Hosting
+
+### Vercel
+
+1. Import the repository and choose the project root.
+2. Leave **Framework Preset** as **Other**, and leave **Build Command** and
+   **Output Directory** blank.
+3. Add the two environment variables from step 1.
+4. Deploy. `vercel.json` enables clean URLs; `api/*.js` become serverless
+   functions automatically.
+
+### Netlify
+
+Set **Publish directory** to `.` and leave the build command empty. The
+handlers in `api/` are written for Vercel's signature; to get shared
+persistence on Netlify, wrap them in Netlify Functions and point the two
+`fetch("/api/…")` calls in `app.js` at the new paths. Without that, the app
+runs in demo mode.
+
+### GitHub Pages
+
+Pages can host the frontend but cannot run the API, so the app will stay in
+demo mode: a sample workspace with changes kept per device. Choose **Deploy
+from a branch** and the `/ (root)` folder. No rewrite rules are needed.
 
 ## Local preview
 
-From this directory, run:
-
 ```bash
-python3 -m http.server 4173
+npm run dev     # http://localhost:4173, static files plus the /api handlers
+npm test        # unit and API tests
 ```
 
-Then open <http://localhost:4173>. Stop the server with `Ctrl+C`.
+`npm run dev` picks up `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from the
+environment if you want to test against a real database:
+
+```bash
+SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... npm run dev
+```
+
+A plain static server such as `python3 -m http.server` also serves the page,
+but not `/api`, so the app will report demo mode.

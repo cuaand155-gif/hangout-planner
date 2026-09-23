@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f7f8fc" />
+    <meta name="description" content="Gatherly finds the time everyone is free, then helps your group pick something worth doing." />
     <link rel="icon" href="data:," />
     <title>Gatherly — Make time for each other</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -13,8 +14,8 @@
   </head>
   <body>
     <div class="app-shell">
-      <aside class="sidebar">
-        <a class="brand" href="#" aria-label="Gatherly home"><span class="brand-mark">✦</span><span>gatherly</span></a>
+      <aside class="sidebar" id="sidebar">
+        <a class="brand" href="#overview" aria-label="Gatherly home"><span class="brand-mark">✦</span><span>gatherly</span></a>
         <nav class="main-nav" aria-label="Main navigation">
           <a class="nav-item active" href="#overview"><span class="nav-icon">⌂</span>Overview</a>
           <a class="nav-item" href="#availability"><span class="nav-icon">◷</span>Availability</a>
@@ -23,9 +24,9 @@
         <div class="sidebar-bottom">
           <button class="nav-item nav-button" id="calendarButton"><span class="nav-icon">↗</span>Calendar links</button>
           <button class="nav-item nav-button" id="settingsButton"><span class="nav-icon">⚙</span>Settings</button>
-          <button class="profile-card profile-button" id="accountButton" aria-label="Open account">
+          <button class="profile-card profile-button" id="accountButton" aria-label="Open your profile">
             <div class="avatar avatar-lilac">AM</div>
-            <div><strong id="profileName">Alex Morgan</strong><small id="profileSubtitle">Personal space</small></div>
+            <div><strong id="profileName">You</strong><small id="profileSubtitle">Personal space</small></div>
             <span class="more">•••</span>
           </button>
         </div>
@@ -33,68 +34,123 @@
 
       <main class="main-content">
         <header class="topbar">
-          <button class="mobile-menu" aria-label="Open menu">☰</button>
-          <div class="breadcrumb"><span>Workspace</span><b>/</b><strong>Weekend crew</strong></div>
-          <div class="top-actions"><button class="icon-button" aria-label="Notifications">♧<i></i></button><button class="avatar avatar-lilac account-avatar" id="topAccountButton" aria-label="Open account">AM</button></div>
+          <button class="mobile-menu" id="mobileMenu" aria-label="Open menu" aria-expanded="false">☰</button>
+          <div class="breadcrumb"><span>Workspace</span><b>/</b><strong id="workspaceName">Weekend crew</strong></div>
+          <div class="top-actions">
+            <button class="icon-button" id="activityButton" aria-label="Recent activity">♧<i id="activityDot" hidden></i></button>
+            <button class="avatar avatar-lilac account-avatar" id="topAccountButton" aria-label="Open your profile">AM</button>
+          </div>
         </header>
 
         <div class="content-wrap" id="overview">
           <section class="hero">
             <div>
-              <p class="eyebrow">SATURDAY, SEPTEMBER 20 <span class="live-dot"></span> LIVE</p>
+              <p class="eyebrow"><span id="todayStamp">TODAY</span> <span class="live-dot"></span> <span id="syncState">LIVE</span></p>
               <h1>Make time for <em>each other.</em></h1>
               <p class="hero-copy">Find a moment that works for everyone, then fill it with something worth remembering.</p>
             </div>
-            <div class="hero-actions"><button class="outline-button" id="tentativePlanButton">＋ Set a tentative plan</button><button class="primary-button" id="inviteButton"><span>＋</span> Invite a friend</button></div>
+            <div class="hero-actions">
+              <button class="outline-button" id="tentativePlanButton">＋ Set a tentative plan</button>
+              <button class="primary-button" id="inviteButton"><span>＋</span> Invite a friend</button>
+            </div>
           </section>
 
           <section class="status-row" aria-label="Planning status">
-            <div class="status-card"><div class="status-icon green">✓</div><div><small>YOUR AVAILABILITY</small><strong>Ready to share</strong></div><button class="text-button" data-scroll="availability">Edit</button></div>
-            <div class="status-card"><div class="status-icon yellow">◷</div><div><small>THIS WEEKEND</small><strong>3 overlaps found</strong></div><button class="text-button" data-scroll="availability">View</button></div>
-            <div class="status-card privacy-status"><div class="status-icon purple">◉</div><div><small>PRIVACY</small><strong id="privacyStatus">Busy / free only</strong></div><button class="text-button" id="privacyButton">Manage</button></div>
+            <div class="status-card">
+              <div class="status-icon green" id="ownStatusIcon">✓</div>
+              <div><small>YOUR AVAILABILITY</small><strong id="ownStatus">Ready to share</strong></div>
+              <button class="text-button" id="editOwnAvailability">Edit</button>
+            </div>
+            <div class="status-card">
+              <div class="status-icon yellow">◷</div>
+              <div><small id="weekScopeLabel">THIS WEEK</small><strong id="overlapSummary">Looking for overlaps…</strong></div>
+              <button class="text-button" data-scroll="availability">View</button>
+            </div>
+            <div class="status-card privacy-status">
+              <div class="status-icon purple">◉</div>
+              <div><small>PRIVACY</small><strong id="privacyStatus">Busy / free only</strong></div>
+              <button class="text-button" id="privacyButton">Manage</button>
+            </div>
           </section>
 
           <section class="tentative-section" id="tentativePlanSection" hidden>
-            <div class="section-heading compact"><div><p class="eyebrow">JUST A THOUGHT</p><h2>Keep a maybe on the calendar</h2><p>Save the idea now and find the best time with your group later.</p></div><button class="text-button" id="editTentativePlan">Edit plan <span>→</span></button></div>
-            <article class="tentative-card"><div class="tentative-icon">✦</div><div class="tentative-details"><span class="tentative-label">TENTATIVE PLAN</span><h3 id="tentativeTitle"></h3><p id="tentativeTiming"></p><div class="suggestions" id="tentativeSuggestions"></div></div><span class="tentative-badge">Not confirmed</span></article>
+            <div class="section-heading compact">
+              <div><p class="eyebrow">JUST A THOUGHT</p><h2>Keep a maybe on the calendar</h2><p>Save the idea now and find the best time with your group later.</p></div>
+              <div class="heading-actions">
+                <button class="text-button" id="editTentativePlan">Edit plan <span>→</span></button>
+                <button class="text-button subtle" id="removeTentativePlan">Remove</button>
+              </div>
+            </div>
+            <article class="tentative-card">
+              <div class="tentative-icon">✦</div>
+              <div class="tentative-details">
+                <span class="tentative-label">TENTATIVE PLAN</span>
+                <h3 id="tentativeTitle"></h3>
+                <p id="tentativeTiming"></p>
+                <div class="suggestions" id="tentativeSuggestions"></div>
+              </div>
+              <span class="tentative-badge" id="tentativeBadge">Not confirmed</span>
+            </article>
           </section>
 
           <div class="section-heading" id="availability">
-            <div><p class="eyebrow">THE GROUP</p><h2>When is everyone free?</h2><p>Hover over a block to see who’s in. Details stay private by default.</p></div>
-            <div class="week-switcher"><button aria-label="Previous week">‹</button><strong>Sep 22 – 28, 2025</strong><button aria-label="Next week">›</button></div>
+            <div><p class="eyebrow">THE GROUP</p><h2>When is everyone free?</h2><p>Hover a block to see who’s in. Details stay private by default.</p></div>
+            <div class="week-switcher">
+              <button id="prevWeek" aria-label="Previous week">‹</button>
+              <strong id="weekLabel">This week</strong>
+              <button id="nextWeek" aria-label="Next week">›</button>
+              <button class="text-button" id="thisWeek" hidden>Today</button>
+            </div>
           </div>
 
           <section class="availability-card">
-            <div class="availability-header"><div class="legend"><span><i class="legend-dot overlap"></i>Everyone’s free</span><span><i class="legend-dot partial"></i>Some are free</span><span><i class="legend-dot busy"></i>Busy</span></div><button class="outline-button" id="shareButton">↗ Share view</button></div>
-            <div class="calendar-grid" role="grid" aria-label="Group availability for September 22 to 28">
-              <div class="grid-corner">GMT−5</div><div class="day"><small>MON</small><strong>22</strong></div><div class="day"><small>TUE</small><strong>23</strong></div><div class="day today"><small>WED</small><strong>24</strong><span>Today</span></div><div class="day"><small>THU</small><strong>25</strong></div><div class="day"><small>FRI</small><strong>26</strong></div>
-              <div class="time-label">8 AM</div><div class="slot busy"></div><div class="slot partial"></div><div class="slot busy"></div><div class="slot busy"></div><div class="slot partial"></div>
-              <div class="time-label">10 AM</div><div class="slot partial"></div><div class="slot overlap selected" tabindex="0" aria-label="Tuesday 10 AM, everyone free"></div><div class="slot overlap"></div><div class="slot partial"></div><div class="slot overlap"></div>
-              <div class="time-label">12 PM</div><div class="slot busy"></div><div class="slot overlap"></div><div class="slot overlap"></div><div class="slot overlap"></div><div class="slot partial"></div>
-              <div class="time-label">2 PM</div><div class="slot overlap"></div><div class="slot overlap"></div><div class="slot partial"></div><div class="slot busy"></div><div class="slot overlap"></div>
-              <div class="time-label">4 PM</div><div class="slot partial"></div><div class="slot overlap"></div><div class="slot overlap"></div><div class="slot partial"></div><div class="slot overlap"></div>
-              <div class="time-label">6 PM</div><div class="slot overlap"></div><div class="slot partial"></div><div class="slot overlap"></div><div class="slot overlap"></div><div class="slot overlap"></div>
+            <div class="availability-header">
+              <div class="view-tabs" role="tablist" aria-label="Availability view">
+                <button class="view-tab active" id="groupViewTab" role="tab" aria-selected="true" data-view="group">Group</button>
+                <button class="view-tab" id="mineViewTab" role="tab" aria-selected="false" data-view="mine">My availability</button>
+              </div>
+              <div class="legend" id="groupLegend">
+                <span><i class="legend-dot overlap"></i>Everyone’s free</span>
+                <span><i class="legend-dot partial"></i>Some are free</span>
+                <span><i class="legend-dot busy"></i>Busy</span>
+              </div>
+              <div class="legend" id="mineLegend" hidden>
+                <span><i class="legend-dot overlap"></i>You’re free</span>
+                <span><i class="legend-dot busy"></i>You’re busy</span>
+              </div>
+              <div class="header-actions">
+                <button class="outline-button" id="syncCalendarButton">↻ Sync calendar</button>
+                <button class="outline-button" id="shareButton">↗ Share view</button>
+              </div>
             </div>
-            <div class="selected-window"><div class="window-icon">✦</div><div><strong>Tuesday, September 23 · 10:00 AM</strong><p>Everyone is free for a 2-hour window</p></div><button class="primary-button small" id="planButton">Plan something <span>→</span></button></div>
+            <p class="edit-hint" id="editHint" hidden>Mark the hours you’re busy by clicking or dragging. Anything you leave light is shared with your group as free.</p>
+            <div id="calendarGrid" class="calendar-grid" role="grid" aria-label="Group availability"></div>
+            <p class="slot-detail" id="slotDetail" aria-live="polite"></p>
+            <div class="selected-window" id="selectedWindow" hidden>
+              <div class="window-icon">✦</div>
+              <div><strong id="selectedWindowTitle"></strong><p id="selectedWindowDetail"></p></div>
+              <button class="primary-button small" id="planButton">Plan something <span>→</span></button>
+            </div>
+            <div class="mine-actions" id="mineActions" hidden>
+              <button class="outline-button" id="saveUsualWeek">Save as my usual week</button>
+              <button class="outline-button" id="clearMyWeek">I’m free all week</button>
+            </div>
           </section>
 
           <section class="people-section">
-            <div class="section-heading compact"><div><p class="eyebrow">5 PEOPLE</p><h2>Everyone’s in the loop</h2></div><button class="text-button" id="managePeople">Manage people <span>→</span></button></div>
-            <div class="people-grid">
-              <article class="person-card"><div class="person-top"><div class="avatar avatar-coral">JM</div><span class="presence"></span></div><strong>Jamie Miller</strong><small>Updated 12m ago</small><span class="person-status">✓ All set</span></article>
-              <article class="person-card"><div class="person-top"><div class="avatar avatar-mint">TK</div><span class="presence"></span></div><strong>Taylor Kim</strong><small>Updated 1h ago</small><span class="person-status">✓ All set</span></article>
-              <article class="person-card"><div class="person-top"><div class="avatar avatar-yellow">RL</div><span class="presence away"></span></div><strong>Riley Lee</strong><small>Updated yesterday</small><span class="person-status muted">Needs update</span></article>
-              <article class="person-card add-person" id="addPerson"><div class="add-icon">＋</div><strong>Add someone</strong><small>Invite a friend to join</small></article>
+            <div class="section-heading compact">
+              <div><p class="eyebrow" id="peopleCount">PEOPLE</p><h2>Everyone’s in the loop</h2></div>
+              <button class="text-button" id="managePeople">Manage people <span id="friendBadge" class="count-badge" hidden></span> <span>→</span></button>
             </div>
+            <div class="people-grid" id="peopleGrid"></div>
           </section>
 
           <section class="ideas-section" id="ideas">
-            <div class="section-heading compact"><div><p class="eyebrow">MAKE IT COUNT</p><h2>What sounds good?</h2></div><button class="outline-button" id="addIdea">＋ Add an idea</button></div>
-            <div class="idea-grid">
-              <article class="idea-card selected-idea"><div class="idea-image brunch"><span>☕</span><button class="heart" aria-label="Remove brunch idea">♥</button></div><div class="idea-content"><span class="tag">POPULAR</span><h3>Slow morning brunch</h3><p>Good coffee, no rush, extra syrup.</p><div class="idea-meta"><span>⌖ Anywhere</span><span>♡ 4 votes</span></div></div></article>
-              <article class="idea-card"><div class="idea-image park"><span>☀</span><button class="heart" aria-label="Like park idea">♡</button></div><div class="idea-content"><span class="tag green-tag">OUTSIDE</span><h3>Picnic in the park</h3><p>Fresh air and a blanket in the sun.</p><div class="idea-meta"><span>⌖ Riverside Park</span><span>♡ 2 votes</span></div></div></article>
-              <article class="idea-card"><div class="idea-image games"><span>✦</span><button class="heart" aria-label="Like games idea">♡</button></div><div class="idea-content"><span class="tag purple-tag">COZY</span><h3>Games night</h3><p>Bring your best strategy and snacks.</p><div class="idea-meta"><span>⌖ At someone’s place</span><span>♡ 3 votes</span></div></div></article>
+            <div class="section-heading compact">
+              <div><p class="eyebrow">MAKE IT COUNT</p><h2>What sounds good?</h2></div>
+              <button class="outline-button" id="addIdea">＋ Add an idea</button>
             </div>
+            <div class="idea-grid" id="ideaGrid"></div>
           </section>
 
           <footer><span>Made for the moments between plans.</span><span>Privacy-first by design <b>✦</b></span></footer>
@@ -103,13 +159,192 @@
     </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
-    <dialog id="privacyDialog"><div class="dialog-header"><div><p class="eyebrow">PRIVACY CONTROLS</p><h2>Your calendar, your call.</h2></div><button class="close-dialog" aria-label="Close">×</button></div><p class="dialog-copy">Choose how much detail your friends can see. You can change this for each event when you add one.</p><div class="privacy-options"><label class="privacy-option active"><input type="radio" name="privacy" value="busy" checked /><span class="radio"></span><span><strong>Busy / free only</strong><small>Show available time blocks without event names or locations.</small></span></label><label class="privacy-option"><input type="radio" name="privacy" value="details" /><span class="radio"></span><span><strong>Show event details</strong><small>Share names and locations so friends can plan around them.</small></span></label></div><button class="primary-button full" id="savePrivacy">Save privacy setting</button></dialog>
-    <dialog id="calendarDialog"><div class="dialog-header"><div><p class="eyebrow">OPTIONAL INTEGRATION</p><h2>Connect a calendar.</h2></div><button class="close-dialog" aria-label="Close">×</button></div><p class="dialog-copy">Import busy times automatically, or paste a read-only calendar link. We’ll never edit your events.</p><div class="integration-option"><div class="integration-icon google">G</div><div><strong>Google Calendar</strong><small>Sync busy times and show schedule overlaps.</small></div><button class="outline-button connect-button" id="googleCalendarButton">Connect</button></div><div class="integration-option"><div class="integration-icon apple">●</div><div><strong>Apple / iCloud calendar</strong><small>Paste a read-only calendar URL.</small></div><button class="outline-button connect-button" id="appleCalendarButton">Add link</button></div><label class="schedule-toggle"><input type="checkbox" id="shareScheduleToggle" checked /><span><strong>Let friends see my availability</strong><small>Only busy/free blocks are shared unless you choose event details.</small></span></label><p class="privacy-note">▣ <strong>Private by default.</strong> You decide what friends see.</p></dialog>
-    <dialog id="accountDialog"><div class="dialog-header"><div><p class="eyebrow">YOUR ACCOUNT</p><h2 id="accountTitle">Keep your plans together.</h2></div><button class="close-dialog" aria-label="Close">×</button></div><p class="dialog-copy" id="accountCopy">Sign in to keep your groups and availability available wherever you plan.</p><div class="account-status"><span class="account-status-dot"></span><div><strong id="accountStatus">Not signed in</strong><small id="accountStatusDetail">Your local planner session is active.</small></div></div><button class="google-button" id="googleSignInButton"><span class="google-logo">G</span> Continue with Google</button><p class="auth-note" id="authNote">Google sign-in is ready to connect, but this deployment has not been given OAuth credentials yet.</p></dialog>
-    <dialog id="tentativePlanDialog"><div class="dialog-header"><div><p class="eyebrow">TENTATIVE PLAN</p><h2>What might be fun?</h2></div><button class="close-dialog" aria-label="Close">×</button></div><p class="dialog-copy">Save an idea without locking anyone into a date. We’ll use the timing you choose to find overlaps.</p><form id="tentativePlanForm"><label class="field-label" for="planActivity">Plan idea</label><input class="text-input" id="planActivity" name="activity" placeholder="Dinner at Luma" required /><label class="field-label" for="planLocation">Where</label><input class="text-input" id="planLocation" name="location" placeholder="A restaurant, park, or neighborhood" /><label class="field-label" for="planAudience">Plan with</label><select class="text-input" id="planAudience" name="audience"><option value="Weekend crew">Weekend crew</option></select><fieldset class="timing-options"><legend class="field-label">When should we look?</legend><label><input type="radio" name="timing" value="week" checked /><span>This week</span></label><label><input type="radio" name="timing" value="month" /><span>This month</span></label><label><input type="radio" name="timing" value="later" /><span>Later</span></label><label><input type="radio" name="timing" value="range" /><span>Date range</span></label></fieldset><div class="date-range" id="dateRangeFields" hidden><div><label class="field-label" for="planStart">From</label><input class="text-input" type="date" id="planStart" name="start" /></div><div><label class="field-label" for="planEnd">To</label><input class="text-input" type="date" id="planEnd" name="end" /></div></div><button class="primary-button full" type="submit">Save tentative plan</button></form></dialog>
-    <dialog id="peopleDialog"><div class="dialog-header"><div><p class="eyebrow">YOUR CIRCLE</p><h2>Friends and groups</h2></div><button class="close-dialog" aria-label="Close">×</button></div><p class="dialog-copy">Connect with friends, then choose whose availability you want to compare.</p><div class="people-tabs"><button class="people-tab active" data-people-tab="friend">Add a friend</button><button class="people-tab" data-people-tab="group">Create a group</button></div><form id="friendForm" class="people-form"><label class="field-label" for="friendName">Friend name</label><input class="text-input" id="friendName" placeholder="Jordan Lee" required /><label class="field-label" for="friendEmail">Email (optional)</label><input class="text-input" id="friendEmail" type="email" placeholder="jordan@example.com" /><button class="primary-button full" type="submit">Send friend invite</button></form><form id="groupForm" class="people-form" hidden><label class="field-label" for="groupName">Group name</label><input class="text-input" id="groupName" placeholder="Book club" required /><p class="form-hint">You can add members after creating the group.</p><button class="primary-button full" type="submit">Create friend group</button></form><div class="saved-people" id="savedPeople"></div></dialog>
-    <dialog id="profileDialog"><div class="dialog-header"><div><p class="eyebrow">YOUR PROFILE</p><h2>How friends see you.</h2></div><button class="close-dialog" aria-label="Close">×</button></div><p class="dialog-copy">Add a photo and a name so your friends know whose schedule they’re comparing.</p><form id="profileForm"><div class="profile-editor"><div class="profile-photo" id="profilePhotoPreview">AM</div><div><label class="field-label" for="profilePhotoUrl">Profile photo URL</label><input class="text-input" id="profilePhotoUrl" type="url" placeholder="https://..." /><small class="form-hint">Use a hosted image URL for this prototype.</small></div></div><label class="field-label" for="profileDisplayName">Display name</label><input class="text-input" id="profileDisplayName" placeholder="Alex Morgan" required /><label class="schedule-toggle"><input type="checkbox" id="profileShareSchedule" checked /><span><strong>Share my availability with friends</strong><small>Friends see free/busy blocks, not event details.</small></span></label><button class="primary-button full" type="submit">Save profile</button></form></dialog>
+
+    <dialog id="privacyDialog">
+      <div class="dialog-header"><div><p class="eyebrow">PRIVACY CONTROLS</p><h2>Your calendar, your call.</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <p class="dialog-copy">Choose how much detail this group shares when calendars are imported. Busy times are always just blocks of time until you opt in to more.</p>
+      <div class="privacy-options">
+        <label class="privacy-option active"><input type="radio" name="privacy" value="busy" checked /><span class="radio"></span><span><strong>Busy / free only</strong><small>Show available time blocks without event names or locations.</small></span></label>
+        <label class="privacy-option"><input type="radio" name="privacy" value="details" /><span class="radio"></span><span><strong>Show event details</strong><small>Share names so friends can see what they’re planning around.</small></span></label>
+      </div>
+      <p class="privacy-note">▣ <strong>Switching back removes titles.</strong> Event names already imported are stripped from your shared times.</p>
+      <button class="primary-button full" id="savePrivacy">Save privacy setting</button>
+    </dialog>
+
+    <dialog id="calendarDialog">
+      <div class="dialog-header"><div><p class="eyebrow">OPTIONAL INTEGRATION</p><h2>Connect a calendar.</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <p class="dialog-copy">Import busy times automatically, or paste a read-only calendar link. Gatherly only ever reads — it never edits your events.</p>
+      <div class="integration-option">
+        <div class="integration-icon google">G</div>
+        <div><strong>Google Calendar</strong><small id="googleCalendarState">Sync busy times and show schedule overlaps.</small></div>
+        <button class="outline-button connect-button" id="googleCalendarButton">Connect</button>
+      </div>
+      <form class="integration-form" id="icsForm">
+        <div class="integration-option">
+          <div class="integration-icon apple">●</div>
+          <div><strong>Apple / iCloud, Outlook, or any ICS link</strong><small>Paste the public or secret <em>.ics</em> address of a calendar.</small></div>
+        </div>
+        <label class="field-label" for="icsUrl">Calendar link</label>
+        <input class="text-input" id="icsUrl" type="url" inputmode="url" placeholder="https://p1-calendars.icloud.com/published/…" />
+        <button class="outline-button full" type="submit" id="icsSubmit">Import busy times</button>
+      </form>
+      <div class="source-list" id="calendarSources"></div>
+      <label class="schedule-toggle"><input type="checkbox" id="shareScheduleToggle" checked /><span><strong>Let friends see my availability</strong><small>Only busy/free blocks are shared unless the group turns on event details.</small></span></label>
+      <p class="privacy-note">▣ <strong>Calendar links stay on this device.</strong> Only the resulting busy blocks are shared with your group.</p>
+    </dialog>
+
+    <dialog id="accountDialog">
+      <div class="dialog-header"><div><p class="eyebrow">YOUR ACCOUNT</p><h2 id="accountTitle">Keep your plans together.</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <p class="dialog-copy" id="accountCopy">Sign in to keep your groups and availability wherever you plan.</p>
+      <div class="account-status"><span class="account-status-dot" id="accountStatusDot"></span><div><strong id="accountStatus">Not signed in</strong><small id="accountStatusDetail">Your local planner session is active.</small></div></div>
+      <button class="google-button" id="googleSignInButton"><span class="google-logo">G</span> Continue with Google</button>
+      <button class="outline-button full" id="signOutButton" hidden>Sign out</button>
+      <p class="auth-note" id="authNote">Signing in links this planner to your Google account so your name and availability follow you between devices.</p>
+    </dialog>
+
+    <dialog id="tentativePlanDialog">
+      <div class="dialog-header"><div><p class="eyebrow">TENTATIVE PLAN</p><h2>What might be fun?</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <p class="dialog-copy">Save an idea without locking anyone into a date. We’ll use the timing you choose to find overlaps.</p>
+      <form id="tentativePlanForm">
+        <label class="field-label" for="planActivity">Plan idea</label>
+        <input class="text-input" id="planActivity" name="activity" placeholder="Dinner at Luma" required maxlength="80" />
+        <label class="field-label" for="planLocation">Where</label>
+        <input class="text-input" id="planLocation" name="location" placeholder="A restaurant, park, or neighborhood" maxlength="80" />
+        <label class="field-label" for="planAudience">Plan with</label>
+        <select class="text-input" id="planAudience" name="audience"></select>
+        <fieldset class="timing-options">
+          <legend class="field-label">When should we look?</legend>
+          <label><input type="radio" name="timing" value="week" checked /><span>This week</span></label>
+          <label><input type="radio" name="timing" value="month" /><span>This month</span></label>
+          <label><input type="radio" name="timing" value="later" /><span>Later</span></label>
+          <label><input type="radio" name="timing" value="range" /><span>Date range</span></label>
+        </fieldset>
+        <div class="date-range" id="dateRangeFields" hidden>
+          <div><label class="field-label" for="planStart">From</label><input class="text-input" type="date" id="planStart" name="start" /></div>
+          <div><label class="field-label" for="planEnd">To</label><input class="text-input" type="date" id="planEnd" name="end" /></div>
+        </div>
+        <button class="primary-button full" type="submit">Save tentative plan</button>
+      </form>
+    </dialog>
+
+    <dialog id="peopleDialog">
+      <div class="dialog-header"><div><p class="eyebrow">YOUR CIRCLE</p><h2>Friends and groups</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <p class="dialog-copy">Share the link so friends can add their own times, or add a placeholder for someone you’ll chase later.</p>
+      <label class="field-label" for="inviteLink">Invite link</label>
+      <div class="copy-row"><input class="text-input" id="inviteLink" readonly /><button class="outline-button" id="copyInviteLink" type="button">Copy</button></div>
+      <div class="people-tabs">
+        <button class="people-tab active" data-people-tab="friend">Add a person</button>
+        <button class="people-tab" data-people-tab="friends" id="friendsTab">Friends</button>
+        <button class="people-tab" data-people-tab="group">Rename group</button>
+      </div>
+      <form id="friendForm" class="people-form">
+        <label class="field-label" for="friendName">Their name</label>
+        <input class="text-input" id="friendName" placeholder="Jordan Lee" required maxlength="60" />
+        <label class="field-label" for="friendEmail">Email (optional)</label>
+        <input class="text-input" id="friendEmail" type="email" placeholder="jordan@example.com" maxlength="120" />
+        <p class="form-hint">They’ll show as waiting for times until they open the link and add their own.</p>
+        <button class="primary-button full" type="submit">Add to this group</button>
+      </form>
+      <div id="friendsPanel" class="people-form" hidden>
+        <div id="friendsSignedOut" hidden>
+          <p class="form-hint">Friend requests need an account, so both people can be reached. The invite link above works without one.</p>
+          <button class="google-button" id="friendsSignInButton" type="button"><span class="google-logo">G</span> Continue with Google</button>
+        </div>
+        <div id="friendsSignedIn" hidden>
+          <form id="friendRequestForm">
+            <label class="field-label" for="friendRequestEmail">Send a friend request</label>
+            <div class="copy-row">
+              <input class="text-input" id="friendRequestEmail" type="email" placeholder="jordan@example.com" maxlength="120" />
+              <button class="outline-button" type="submit" id="sendFriendRequest">Send</button>
+            </div>
+            <p class="form-hint">They'll see it the next time they sign in, even if they don't have an account yet.</p>
+          </form>
+          <div class="friend-section" id="incomingSection" hidden>
+            <p class="eyebrow">WAITING FOR YOU</p>
+            <div class="friend-list" id="incomingList"></div>
+          </div>
+          <div class="friend-section" id="outgoingSection" hidden>
+            <p class="eyebrow">SENT</p>
+            <div class="friend-list" id="outgoingList"></div>
+          </div>
+          <div class="friend-section">
+            <p class="eyebrow">YOUR FRIENDS</p>
+            <div class="friend-list" id="friendList"></div>
+          </div>
+        </div>
+      </div>
+      <form id="groupForm" class="people-form" hidden>
+        <label class="field-label" for="groupName">Group name</label>
+        <input class="text-input" id="groupName" placeholder="Weekend crew" required maxlength="60" />
+        <p class="form-hint">This is the name everyone sees at the top of the planner.</p>
+        <button class="primary-button full" type="submit">Save group name</button>
+      </form>
+      <p class="eyebrow roster-label">IN THIS GROUP</p>
+      <div class="saved-people" id="savedPeople"></div>
+    </dialog>
+
+    <dialog id="profileDialog">
+      <div class="dialog-header"><div><p class="eyebrow">YOUR PROFILE</p><h2>How friends see you.</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <p class="dialog-copy">Add a photo and a name so your friends know whose schedule they’re comparing.</p>
+      <form id="profileForm">
+        <div class="profile-editor">
+          <div class="profile-photo" id="profilePhotoPreview">AM</div>
+          <div><label class="field-label" for="profilePhotoUrl">Profile photo URL</label><input class="text-input" id="profilePhotoUrl" type="url" placeholder="https://…" /><small class="form-hint">Any hosted image link works.</small></div>
+        </div>
+        <label class="field-label" for="profileDisplayName">Display name</label>
+        <input class="text-input" id="profileDisplayName" placeholder="Alex Morgan" required maxlength="60" />
+        <label class="schedule-toggle"><input type="checkbox" id="profileShareSchedule" checked /><span><strong>Share my availability with friends</strong><small>Friends see free/busy blocks, not event details.</small></span></label>
+        <button class="primary-button full" type="submit">Save profile</button>
+        <button class="outline-button full" id="openAccountFromProfile" type="button">Account and sign-in</button>
+      </form>
+    </dialog>
+
+    <dialog id="ideaDialog">
+      <div class="dialog-header"><div><p class="eyebrow" id="ideaDialogEyebrow">NEW IDEA</p><h2 id="ideaDialogTitle">What sounds good?</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <form id="ideaForm">
+        <label class="field-label" for="ideaTitle">Idea</label>
+        <input class="text-input" id="ideaTitle" placeholder="Slow morning brunch" required maxlength="80" />
+        <label class="field-label" for="ideaDescription">A little note</label>
+        <input class="text-input" id="ideaDescription" placeholder="Good coffee, no rush, extra syrup." maxlength="280" />
+        <label class="field-label" for="ideaLocation">Where</label>
+        <input class="text-input" id="ideaLocation" placeholder="Anywhere" maxlength="80" />
+        <label class="field-label" for="ideaTag">Tag</label>
+        <input class="text-input" id="ideaTag" placeholder="COZY" maxlength="24" />
+        <label class="field-label" for="ideaStyle">Card colour</label>
+        <select class="text-input" id="ideaStyle"></select>
+        <button class="primary-button full" type="submit" id="ideaSubmit">Add idea</button>
+        <button class="outline-button full danger" type="button" id="deleteIdea" hidden>Delete this idea</button>
+      </form>
+    </dialog>
+
+    <dialog id="settingsDialog">
+      <div class="dialog-header"><div><p class="eyebrow">SETTINGS</p><h2>How this planner works.</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <form id="settingsForm">
+        <label class="field-label" for="settingWorkspaceName">Group name</label>
+        <input class="text-input" id="settingWorkspaceName" maxlength="60" required />
+        <div class="setting-grid">
+          <div><label class="field-label" for="settingWeekStart">Week starts</label><select class="text-input" id="settingWeekStart"><option value="1">Monday</option><option value="0">Sunday</option></select></div>
+          <div><label class="field-label" for="settingMinWindow">Shortest window</label><select class="text-input" id="settingMinWindow"></select></div>
+          <div><label class="field-label" for="settingDayStart">Day starts</label><select class="text-input" id="settingDayStart"></select></div>
+          <div><label class="field-label" for="settingDayEnd">Day ends</label><select class="text-input" id="settingDayEnd"></select></div>
+        </div>
+        <label class="schedule-toggle"><input type="checkbox" id="settingLocked" /><span><strong>Only signed-in members can edit</strong><small>Without this, anyone holding the invite link can change this workspace.</small></span></label>
+        <p class="form-hint" id="lockHint"></p>
+        <button class="primary-button full" type="submit">Save settings</button>
+      </form>
+      <div class="setting-footer">
+        <button class="outline-button" id="exportWorkspace" type="button">Export as JSON</button>
+        <button class="outline-button danger" id="resetLocal" type="button">Reset this device</button>
+      </div>
+      <p class="auth-note" id="timezoneNote"></p>
+    </dialog>
+
+    <dialog id="activityDialog">
+      <div class="dialog-header"><div><p class="eyebrow">RECENT ACTIVITY</p><h2>What changed.</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <div class="activity-list" id="activityList"></div>
+    </dialog>
+
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js"></script>
+    <script type="module" src="app.js"></script>
   </body>
 </html>
