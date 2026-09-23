@@ -37,6 +37,21 @@ import { forgetGroup, mergeGroups, newGroupSlug, rememberGroup } from "./lib/gro
 import { dueForSync, sameBusy } from "./lib/sync.js";
 import { isSafeImageDataUrl, squareCrop } from "./lib/avatar.js";
 import { PALETTES, normalizePalette } from "./lib/palettes.js";
+import {
+  GROUP_LEVELS,
+  LEVELS,
+  LEVEL_LABELS,
+  cleanSharedEvents,
+  createShareStore,
+  dedupeEvents,
+  eventsForLevel,
+  eventsOnDay,
+  isPicked,
+  levelForFriend,
+  normalizeSharing,
+  showsTitle,
+  togglePicked,
+} from "./lib/sharing.js";
 
 // Browser-safe credentials: the publishable (anon) key is designed to ship in
 // client code. Row level security in supabase/schema.sql is what protects data.
@@ -62,6 +77,9 @@ const STORAGE = {
   added: "gatherly-calendar-added",
   pendingName: (slug) => `gatherly-new-group:${slug}`,
   palette: "gatherly-palette",
+  myEvents: "gatherly-my-events",
+  sharing: "gatherly-sharing",
+  published: "gatherly-published-shares",
 };
 
 const supabaseClient = AUTH_CONFIG.configured && window.supabase
@@ -110,6 +128,9 @@ const ui = {
   editingIdeaId: null,
   saving: false,
   user: null,
+  myWeekOffset: 0,
+  previewAs: "me",
+  friendCalendar: null,
 };
 
 let profile = {
@@ -124,8 +145,14 @@ window.localStorage.setItem(STORAGE.member, memberId);
 
 let calendarSources = readJson(STORAGE.sources, []);
 
+// Your imported events with their names, per calendar. This never leaves the
+// browser; groups and friends get filtered copies (see lib/sharing.js).
+let myEvents = readJson(STORAGE.myEvents, {});
+let sharing = normalizeSharing(readJson(STORAGE.sharing, null));
+
 const friendStore = supabaseClient ? createFriendStore(supabaseClient) : null;
 const friends = { rows: [], profiles: {}, loaded: false, busy: false };
+const shareStore = supabaseClient ? createShareStore(supabaseClient) : null;
 
 let demoNoticeShown = false;
 const noteDemoMode = () => {
@@ -373,6 +400,7 @@ function render() {
   renderGrid();
   renderPeople();
   renderIdeas();
+  renderMyCalendar();
   renderActivityBadge();
 }
 
@@ -840,43 +868,94 @@ function syncRange() {
   return { from, to: addDays(from, SYNC_WEEKS * 7) };
 }
 
-/** Writes imported busy blocks into my member row, replacing the last import. */
+function sourceKind(sourceKey) {
+  return sourceKey === "google" ? "google" : "ics";
+}
+
+/** Every imported event from every connected calendar, names included. */
+function allMyEvents() {
+  return dedupeEvents(Object.values(myEvents).flatMap((entry) => entry?.events || []));
+}
+
+function saveMyEvents() {
+  writeJson(STORAGE.myEvents, myEvents);
+}
+
+/** Whether an event's name may be written into this group's shared planner. */
+function groupSeesTitle(title) {
+  return session.state.privacy === "details" && showsTitle(sharing, sharing.groups, title);
+}
+
 /**
- * Saves imported busy times over the previous import from the same source.
- * Returns { count, changed }; when nothing changed nothing is saved, so an
- * automatic refresh never touches the shared workspace or its activity feed.
+ * Remembers one calendar's events on this device, then saves the busy times
+ * to the group. Returns { count, changed }; when nothing changed nothing is
+ * saved, so an automatic refresh never touches the shared workspace or its
+ * activity feed.
  */
-async function storeImportedBlocks(blocks, source, range, { quiet = false } = {}) {
-  const wantsDetails = session.state.privacy === "details";
-  const cleaned = blocks
-    .map((block) => ({
-      start: new Date(block.start),
-      end: new Date(block.end),
-      ...(wantsDetails && block.title ? { title: block.title } : {}),
+async function storeImportedBlocks(events, sourceKey, range, { quiet = false } = {}) {
+  const cleaned = events
+    .map((event) => ({
+      start: new Date(event.start),
+      end: new Date(event.end),
+      ...(event.allDay ? { allDay: true } : {}),
+      ...(event.title ? { title: String(event.title).slice(0, 120) } : {}),
     }))
-    .filter((block) => !Number.isNaN(block.start.getTime()) && !Number.isNaN(block.end.getTime()) && block.end > block.start);
+    .filter((event) => !Number.isNaN(event.start.getTime()) && !Number.isNaN(event.end.getTime()) && event.end > event.start);
+
+  myEvents[sourceKey] = {
+    from: range.from.toISOString(),
+    to: range.to.toISOString(),
+    events: cleaned.map((event) => ({ ...event, start: event.start.toISOString(), end: event.end.toISOString() })),
+  };
+  saveMyEvents();
+  schedulePublish();
+  renderMyCalendar();
+  const changed = await publishKindToGroup(sourceKind(sourceKey), range, { quiet });
+  return { count: cleaned.length, changed };
+}
+
+/**
+ * Writes the busy times from every calendar of one kind into my row. All of
+ * them go together, so refreshing one calendar link never wipes another's.
+ */
+async function publishKindToGroup(kind, range, { quiet = false } = {}) {
+  const blocks = Object.entries(myEvents)
+    .filter(([key]) => sourceKind(key) === kind)
+    .flatMap(([, entry]) => entry?.events || [])
+    .map((event) => ({
+      start: new Date(event.start),
+      end: new Date(event.end),
+      ...(groupSeesTitle(event.title) ? { title: event.title } : {}),
+    }));
 
   const mine = me();
   if (mine) {
     const nextBusy = normalizeWorkspaceState({
-      members: [{ ...mine, busy: replaceBusyRange(mine.busy, cleaned, { source, from: range.from, to: range.to }) }],
+      members: [{ ...mine, busy: replaceBusyRange(mine.busy, blocks, { source: kind, from: range.from, to: range.to }) }],
     }).members[0].busy;
     const nextCoverage = widenCoverage(mine.coverage, range.from, addDays(range.to, -1));
     const coverageSame = mine.coverage && mine.coverage.from === nextCoverage.from && mine.coverage.to === nextCoverage.to;
-    if (coverageSame && sameBusy(mine.busy, nextBusy)) return { count: cleaned.length, changed: false };
+    if (coverageSame && sameBusy(mine.busy, nextBusy)) return false;
   }
 
   await mutate(
     (draft) => {
       const member = draft.members.find((entry) => entry.id === memberId);
       if (!member) return;
-      member.busy = replaceBusyRange(member.busy, cleaned, { source, from: range.from, to: range.to });
+      member.busy = replaceBusyRange(member.busy, blocks, { source: kind, from: range.from, to: range.to });
       member.coverage = widenCoverage(member.coverage, range.from, addDays(range.to, -1));
       member.updatedAt = new Date().toISOString();
     },
     quiet ? undefined : { note: `${displayName()} synced a calendar` }
   );
-  return { count: cleaned.length, changed: true };
+  return true;
+}
+
+/** Re-applies the group rules to what's already imported, after a setting changes. */
+async function republishToGroup() {
+  const range = syncRange();
+  const kinds = new Set(Object.keys(myEvents).map(sourceKind));
+  for (const kind of kinds) await publishKindToGroup(kind, range, { quiet: true });
 }
 
 async function importIcs(url, { silent = false, quiet = false } = {}) {
@@ -888,7 +967,9 @@ async function importIcs(url, { silent = false, quiet = false } = {}) {
       url,
       from: range.from.toISOString(),
       to: range.to.toISOString(),
-      details: session.state.privacy === "details",
+      // Names come back to this browser only; what the group and friends
+      // see is filtered before anything is saved.
+      details: true,
     }),
   });
   const payload = await response.json().catch(() => ({}));
@@ -896,7 +977,7 @@ async function importIcs(url, { silent = false, quiet = false } = {}) {
     if (!silent) showToast(payload.error || "Could not read that calendar link.");
     return null;
   }
-  const { count, changed } = await storeImportedBlocks(payload.blocks || [], "ics", range, { quiet });
+  const { count, changed } = await storeImportedBlocks(payload.blocks || [], `ics:${url}`, range, { quiet });
   if (!silent) showToast(count ? `Imported ${count} busy block${count === 1 ? "" : "s"}.` : "That calendar has no events in the next four weeks.");
   importIcs.lastChanged = changed;
   return count;
@@ -940,6 +1021,7 @@ async function syncGoogle({ silent = false, quiet = false } = {}) {
       start: item.start?.dateTime || (item.start?.date ? `${item.start.date}T00:00:00` : null),
       end: item.end?.dateTime || (item.end?.date ? `${item.end.date}T00:00:00` : null),
       title: item.summary,
+      allDay: Boolean(item.start?.date && !item.start?.dateTime),
     }))
     .filter((block) => block.start && block.end);
 
@@ -1123,6 +1205,8 @@ const dialogs = {
   settings: $("settingsDialog"),
   activity: $("activityDialog"),
   groups: $("groupsDialog"),
+  sharing: $("sharingDialog"),
+  friendCalendar: $("friendCalendarDialog"),
 };
 
 const openDialog = (dialog) => {
@@ -1403,7 +1487,8 @@ $("savePrivacy").addEventListener("click", async () => {
     { note: detailed ? "Event details are now shared" : "Sharing set to busy/free only" }
   );
   dialogs.privacy.close();
-  showToast(detailed ? "Event names are shared with this group." : "Only busy/free blocks are shared.");
+  if (detailed) await republishToGroup();
+  showToast(detailed ? "This group can now see event names each person chooses to share." : "Only busy/free blocks are shared.");
 });
 
 /* Calendar links */
@@ -1469,8 +1554,15 @@ $("icsForm").addEventListener("submit", async (event) => {
 $("calendarSources").addEventListener("click", (event) => {
   const button = event.target.closest("[data-remove-source]");
   if (!button) return;
-  calendarSources.splice(Number(button.dataset.removeSource), 1);
+  const [removed] = calendarSources.splice(Number(button.dataset.removeSource), 1);
   saveSources();
+  if (removed) {
+    delete myEvents[removed.type === "google" ? "google" : `ics:${removed.url}`];
+    saveMyEvents();
+    renderMyCalendar();
+    schedulePublish();
+    publishKindToGroup(removed.type === "google" ? "google" : "ics", syncRange(), { quiet: true });
+  }
   showToast("Calendar link removed from this device.");
 });
 
@@ -1794,6 +1886,8 @@ async function loadFriends({ force = false } = {}) {
   friends.profiles = profiles || {};
   friends.loaded = true;
   renderFriends();
+  renderMyCalendar();
+  schedulePublish();
 }
 
 function friendGroups() {
@@ -1849,7 +1943,10 @@ function renderFriends(errorMessage) {
             : match
               ? `<button type="button" data-add-friend="${escapeAttribute(row.id)}">Link to them</button>`
               : `<button type="button" data-add-friend="${escapeAttribute(row.id)}">Add to group</button>`;
-          return friendRowMarkup(row, action);
+          const calendar = party.id
+            ? `<button type="button" class="quiet" data-view-calendar="${escapeAttribute(party.id)}" data-friend-name="${escapeAttribute(party.name)}">Calendar</button>`
+            : "";
+          return friendRowMarkup(row, calendar + action);
         })
         .join("")
     : `<p class="form-hint">${escapeHtml(errorMessage || "No friends yet. Send a request above, or just share the invite link.")}</p>`;
@@ -1899,6 +1996,13 @@ function friendError(error) {
   if (/relation .* does not exist|friend_requests/i.test(message)) return "Friend requests need the latest supabase/schema.sql.";
   return "That did not go through. Try again in a moment.";
 }
+
+$("friendsPanel").addEventListener("click", (event) => {
+  const view = event.target.closest("[data-view-calendar]");
+  if (!view || !shareStore || !ui.user) return;
+  dialogs.people.close();
+  openFriendCalendar(view.dataset.viewCalendar, view.dataset.friendName || "Your friend");
+});
 
 $("friendsPanel").addEventListener("click", async (event) => {
   const target = event.target.closest("[data-accept], [data-decline], [data-withdraw], [data-add-friend]");
@@ -2261,6 +2365,310 @@ $("activityButton").addEventListener("click", () => {
   if (entries[0]) window.localStorage.setItem(STORAGE.seen(session.slug), entries[0].at);
   renderActivityBadge();
   openDialog(dialogs.activity);
+});
+
+/* My calendar and who sees what */
+
+/** Small stable fingerprint, so an unchanged share is not re-uploaded. */
+function fingerprint(text) {
+  let hash = 5381;
+  for (let index = 0; index < text.length; index += 1) hash = ((hash << 5) + hash + text.charCodeAt(index)) | 0;
+  return `${text.length}:${hash >>> 0}`;
+}
+
+function saveSharing(next) {
+  sharing = normalizeSharing(next);
+  writeJson(STORAGE.sharing, sharing);
+}
+
+function acceptedFriends() {
+  if (!ui.user || !friends.loaded) return [];
+  return friendGroups()
+    .friends.map((row) => ({ row, party: describeParty(row, { userId: ui.user.id, profiles: friends.profiles }) }))
+    .filter((entry) => entry.party.id);
+}
+
+let publishTimer = null;
+function schedulePublish() {
+  clearTimeout(publishTimer);
+  publishTimer = setTimeout(publishToFriends, 600);
+}
+
+/**
+ * Gives each friend exactly what their level allows: one row per friend,
+ * rewritten only when it changes, and deleted for anyone set to "Nothing".
+ */
+async function publishToFriends() {
+  if (!shareStore || !ui.user || !friends.loaded) return;
+  const ownerId = ui.user.id;
+  const published = readJson(STORAGE.published, {});
+  const mine = published[ownerId] || {};
+  const events = allMyEvents();
+  let failed = false;
+  for (const { party } of acceptedFriends()) {
+    const payload = eventsForLevel(events, levelForFriend(sharing, party.id), sharing);
+    const print = payload === null ? "none" : fingerprint(JSON.stringify(payload));
+    if (mine[party.id] === print) continue;
+    const { error } = payload === null ? await shareStore.revoke(ownerId, party.id) : await shareStore.publish(ownerId, party.id, payload);
+    if (error) {
+      failed = true;
+      continue;
+    }
+    mine[party.id] = print;
+  }
+  published[ownerId] = mine;
+  writeJson(STORAGE.published, published);
+  if (failed) showToast("Some friends' calendar views could not be updated. They'll retry next time.");
+}
+
+function myWeek() {
+  const base = startOfWeek(addDays(new Date(), ui.myWeekOffset * 7), settings().weekStartsOn);
+  return buildWeek(base, { today: new Date() });
+}
+
+function eventTimeLabel(event, day) {
+  if (event.allDay) return "All day";
+  const start = new Date(event.start);
+  const end = new Date(event.end);
+  const dayStart = new Date(day.date);
+  dayStart.setHours(0, 0, 0, 0);
+  const startsToday = start >= dayStart;
+  const endsToday = end <= addDays(dayStart, 1);
+  if (!startsToday && !endsToday) return "All day";
+  if (!startsToday) return `Until ${formatClock(end)}`;
+  if (!endsToday) return `From ${formatClock(start)}`;
+  return `${formatClock(start)} – ${formatClock(end)}`;
+}
+
+/** The level the "Preview as" picker stands for, or null for your own view. */
+function previewLevel() {
+  const choice = ui.previewAs;
+  if (choice === "me") return null;
+  if (choice === "friends") return sharing.friends;
+  if (choice === "groups") return session.state.privacy === "details" ? sharing.groups : "busy";
+  return levelForFriend(sharing, choice);
+}
+
+function agendaMarkup(week, events, { owner = true, emptyText }) {
+  return week
+    .map((day) => {
+      const dayEvents = eventsOnDay(events, day.date);
+      const items = dayEvents.length
+        ? dayEvents
+            .map((event) => {
+              const title = event.title || "Busy";
+              const time = eventTimeLabel(event, day);
+              if (!owner || !event.title) {
+                return `<li class="agenda-event${event.title ? "" : " is-busy"}"><span class="agenda-time">${escapeHtml(time)}</span><strong>${escapeHtml(title)}</strong></li>`;
+              }
+              const picked = isPicked(sharing, event.title);
+              return `<li><button type="button" class="agenda-event${picked ? " is-picked" : ""}" data-pick-title="${escapeAttribute(event.title)}" aria-pressed="${picked}">
+                <span class="agenda-time">${escapeHtml(time)}</span><strong>${escapeHtml(title)}</strong>
+                <span class="pick-state">${picked ? "Picked to share" : "Tap to pick"}</span></button></li>`;
+            })
+            .join("")
+        : `<li class="agenda-empty">${escapeHtml(emptyText)}</li>`;
+      return `<div class="agenda-day${day.isToday ? " today" : ""}"><div class="agenda-date"><small>${day.label}</small><strong>${day.dayOfMonth}</strong></div><ul>${items}</ul></div>`;
+    })
+    .join("");
+}
+
+function renderPreviewOptions() {
+  const select = $("mycalPreview");
+  const options = [
+    ["me", "Just me (everything)"],
+    ["friends", `Any friend (${LEVEL_LABELS[sharing.friends]})`],
+    ["groups", "People in this group"],
+    ...acceptedFriends().map(({ party }) => [party.id, party.name]),
+  ];
+  if (!options.some(([value]) => value === ui.previewAs)) ui.previewAs = "me";
+  select.innerHTML = options
+    .map(([value, label]) => `<option value="${escapeAttribute(value)}"${value === ui.previewAs ? " selected" : ""}>${escapeHtml(label)}</option>`)
+    .join("");
+}
+
+function renderMyCalendar() {
+  if (!$("myAgenda")) return;
+  renderPreviewOptions();
+  const week = myWeek();
+  $("myWeekLabel").textContent = formatWeekLabel(week[0].date, week.length);
+  $("myThisWeek").hidden = ui.myWeekOffset === 0;
+
+  const events = allMyEvents();
+  const level = previewLevel();
+  const agenda = $("myAgenda");
+  const summary = $("mycalSummary");
+
+  if (!Object.keys(myEvents).length) {
+    summary.textContent = "";
+    agenda.innerHTML = `<div class="agenda-blank"><strong>Connect a calendar to see it here.</strong><p>Your events show up with their names — only you see those. You decide below what friends and groups get.</p><button class="primary-button small" type="button" data-open-calendars>Connect a calendar</button></div>`;
+    return;
+  }
+
+  if (level === null) {
+    const pickedCount = sharing.picked.length;
+    summary.innerHTML = `Friends see: <strong>${escapeHtml(LEVEL_LABELS[sharing.friends])}</strong>${
+      Object.keys(sharing.perFriend).length ? ` · ${Object.keys(sharing.perFriend).length} set individually` : ""
+    } · ${pickedCount} event name${pickedCount === 1 ? "" : "s"} picked to share. Tap an event to pick or unpick it.`;
+    agenda.innerHTML = agendaMarkup(week, events, { owner: true, emptyText: "Nothing on" });
+    return;
+  }
+
+  if (level === "nothing") {
+    summary.textContent = "";
+    agenda.innerHTML = `<div class="agenda-blank"><strong>They can't see your calendar at all.</strong><p>In a group you share, they still see when you're busy, because that's how the group finds a time.</p></div>`;
+    return;
+  }
+  const visible = eventsForLevel(events, level, sharing);
+  summary.innerHTML = `Previewing as they see it: <strong>${escapeHtml(LEVEL_LABELS[level])}</strong>.`;
+  agenda.innerHTML = agendaMarkup(week, visible, { owner: false, emptyText: "Free" });
+}
+
+$("myPrevWeek").addEventListener("click", () => {
+  ui.myWeekOffset -= 1;
+  renderMyCalendar();
+});
+$("myNextWeek").addEventListener("click", () => {
+  ui.myWeekOffset += 1;
+  renderMyCalendar();
+});
+$("myThisWeek").addEventListener("click", () => {
+  ui.myWeekOffset = 0;
+  renderMyCalendar();
+});
+$("mycalPreview").addEventListener("change", (event) => {
+  ui.previewAs = event.target.value;
+  renderMyCalendar();
+});
+
+$("myAgenda").addEventListener("click", async (event) => {
+  if (event.target.closest("[data-open-calendars]")) {
+    openDialog(dialogs.calendar);
+    return;
+  }
+  const button = event.target.closest("[data-pick-title]");
+  if (!button) return;
+  const title = button.dataset.pickTitle;
+  const wasPicked = isPicked(sharing, title);
+  saveSharing(togglePicked(sharing, title));
+  renderMyCalendar();
+  schedulePublish();
+  if (session.state.privacy === "details" && sharing.groups === "some") await republishToGroup();
+  showToast(wasPicked ? `"${title}" will show as Busy.` : `"${title}" can be seen by anyone set to "Only events I pick".`);
+});
+
+function levelOptions(levels, selected, { defaultLabel } = {}) {
+  const options = defaultLabel ? [`<option value=""${selected ? "" : " selected"}>${escapeHtml(defaultLabel)}</option>`] : [];
+  for (const level of levels) {
+    options.push(`<option value="${level}"${level === selected ? " selected" : ""}>${escapeHtml(LEVEL_LABELS[level])}</option>`);
+  }
+  return options.join("");
+}
+
+function renderSharingDialog() {
+  $("shareFriendsDefault").innerHTML = levelOptions(LEVELS, sharing.friends);
+  $("shareGroups").innerHTML = levelOptions(GROUP_LEVELS, sharing.groups);
+  $("shareGroupsHint").textContent =
+    session.state.privacy === "details"
+      ? "This group allows event names, so this choice applies here."
+      : "This group is set to busy/free only, so it sees no names whatever you pick. Anyone in the group can change that under Privacy.";
+
+  const list = acceptedFriends();
+  $("shareSignedOut").hidden = Boolean(ui.user);
+  $("shareFriendList").innerHTML = !ui.user
+    ? ""
+    : list.length
+      ? list
+          .map(
+            ({ party }) => `<label class="share-friend-row"><span>${escapeHtml(party.name)}</span>
+              <select class="text-input" data-share-friend="${escapeAttribute(party.id)}">${levelOptions(LEVELS, sharing.perFriend[party.id] || "", {
+                defaultLabel: `Default (${LEVEL_LABELS[sharing.friends]})`,
+              })}</select></label>`
+          )
+          .join("")
+      : '<p class="form-hint">No friends yet. Add them under Manage people → Friends.</p>';
+
+  $("pickedList").innerHTML = sharing.picked.length
+    ? sharing.picked
+        .map((key) => `<button type="button" class="picked-chip" data-unpick="${escapeAttribute(key)}">${escapeHtml(key)} <span aria-hidden="true">×</span></button>`)
+        .join("")
+    : '<p class="form-hint">None yet. Tap an event in Your calendar to pick it.</p>';
+}
+
+$("sharingButton").addEventListener("click", () => {
+  renderSharingDialog();
+  openDialog(dialogs.sharing);
+});
+
+$("pickedList").addEventListener("click", (event) => {
+  const chip = event.target.closest("[data-unpick]");
+  if (!chip) return;
+  saveSharing({ ...sharing, picked: sharing.picked.filter((key) => key !== chip.dataset.unpick) });
+  renderSharingDialog();
+});
+
+$("saveSharing").addEventListener("click", async () => {
+  const perFriend = {};
+  for (const select of document.querySelectorAll("[data-share-friend]")) {
+    if (select.value) perFriend[select.dataset.shareFriend] = select.value;
+  }
+  // Keep choices for friends who are not in the list right now (not loaded yet).
+  const shown = new Set([...document.querySelectorAll("[data-share-friend]")].map((select) => select.dataset.shareFriend));
+  for (const [id, level] of Object.entries(sharing.perFriend)) if (!shown.has(id)) perFriend[id] = level;
+
+  saveSharing({ ...sharing, friends: $("shareFriendsDefault").value, groups: $("shareGroups").value, perFriend });
+  dialogs.sharing.close();
+  renderMyCalendar();
+  schedulePublish();
+  if (session.state.privacy === "details") await republishToGroup();
+  showToast("Sharing saved.");
+});
+
+/* A friend's calendar, as much as they chose to show you */
+
+function renderFriendCalendar() {
+  const view = ui.friendCalendar;
+  if (!view) return;
+  const base = startOfWeek(addDays(new Date(), view.offset * 7), settings().weekStartsOn);
+  const week = buildWeek(base, { today: new Date() });
+  $("friendCalendarTitle").textContent = `${view.name}'s calendar`;
+  $("friendWeekLabel").textContent = formatWeekLabel(week[0].date, week.length);
+  const body = $("friendAgenda");
+  if (view.loading) {
+    body.innerHTML = '<p class="form-hint">Loading…</p>';
+    return;
+  }
+  if (!view.events) {
+    body.innerHTML = `<div class="agenda-blank"><strong>${escapeHtml(view.name)} isn't sharing their calendar with you.</strong><p>You'll still see when they're busy in groups you share.</p></div>`;
+    return;
+  }
+  $("friendCalendarUpdated").textContent = view.updatedAt ? `Updated ${formatRelative(view.updatedAt)}` : "";
+  body.innerHTML = `<div class="agenda compact-agenda">${agendaMarkup(week, view.events, { owner: false, emptyText: "Free" })}</div>`;
+}
+
+async function openFriendCalendar(friendId, name) {
+  ui.friendCalendar = { id: friendId, name, offset: 0, loading: true, events: null, updatedAt: null };
+  $("friendCalendarUpdated").textContent = "";
+  renderFriendCalendar();
+  openDialog(dialogs.friendCalendar);
+  const { data, error } = await shareStore.sharedWithMe(friendId, ui.user.id);
+  if (ui.friendCalendar?.id !== friendId) return;
+  ui.friendCalendar.loading = false;
+  ui.friendCalendar.events = error || !data ? null : cleanSharedEvents(data.events);
+  ui.friendCalendar.updatedAt = data?.updated_at || null;
+  if (error) showToast("Couldn't load their calendar. Try again in a moment.");
+  renderFriendCalendar();
+}
+
+$("friendPrevWeek").addEventListener("click", () => {
+  if (!ui.friendCalendar) return;
+  ui.friendCalendar.offset -= 1;
+  renderFriendCalendar();
+});
+$("friendNextWeek").addEventListener("click", () => {
+  if (!ui.friendCalendar) return;
+  ui.friendCalendar.offset += 1;
+  renderFriendCalendar();
 });
 
 /* Navigation chrome */

@@ -20,6 +20,7 @@
         <nav class="main-nav" aria-label="Main navigation">
           <a class="nav-item active" href="#overview"><span class="nav-icon">⌂</span>Overview</a>
           <a class="nav-item" href="#availability"><span class="nav-icon">◷</span>Availability</a>
+          <a class="nav-item" href="#mycalendar"><span class="nav-icon">▦</span>My calendar</a>
           <a class="nav-item" href="#ideas"><span class="nav-icon">✣</span>Activity ideas</a>
         </nav>
         <div class="sidebar-bottom">
@@ -145,6 +146,28 @@
             </div>
           </section>
 
+          <section class="mycal-section" id="mycalendar">
+            <div class="section-heading">
+              <div><p class="eyebrow">JUST FOR YOU</p><h2>Your calendar</h2><p>Only you see event names here. Tap one to choose whether it can be shared.</p></div>
+              <div class="week-switcher">
+                <button id="myPrevWeek" aria-label="Previous week">‹</button>
+                <strong id="myWeekLabel">This week</strong>
+                <button id="myNextWeek" aria-label="Next week">›</button>
+                <button class="text-button" id="myThisWeek" hidden>Today</button>
+              </div>
+            </div>
+            <div class="mycal-card">
+              <div class="mycal-toolbar">
+                <label class="preview-label" for="mycalPreview">Preview as
+                  <select class="text-input" id="mycalPreview"></select>
+                </label>
+                <button class="outline-button" id="sharingButton">👁 Who sees what</button>
+              </div>
+              <p class="mycal-summary" id="mycalSummary"></p>
+              <div class="agenda" id="myAgenda"></div>
+            </div>
+          </section>
+
           <section class="people-section">
             <div class="section-heading compact">
               <div><p class="eyebrow" id="peopleCount">PEOPLE</p><h2>Everyone’s in the loop</h2></div>
@@ -173,7 +196,7 @@
       <p class="dialog-copy">Choose how much detail this group shares when calendars are imported. Busy times are always just blocks of time until you opt in to more.</p>
       <div class="privacy-options">
         <label class="privacy-option active"><input type="radio" name="privacy" value="busy" checked /><span class="radio"></span><span><strong>Busy / free only</strong><small>Show available time blocks without event names or locations.</small></span></label>
-        <label class="privacy-option"><input type="radio" name="privacy" value="details" /><span class="radio"></span><span><strong>Show event details</strong><small>Share names so friends can see what they’re planning around.</small></span></label>
+        <label class="privacy-option"><input type="radio" name="privacy" value="details" /><span class="radio"></span><span><strong>Show event details</strong><small>Lets names through to this group — but only the events each person allows under My calendar → Who sees what.</small></span></label>
       </div>
       <p class="privacy-note">▣ <strong>Switching back removes titles.</strong> Event names already imported are stripped from your shared times.</p>
       <button class="primary-button full" id="savePrivacy">Save privacy setting</button>
@@ -348,6 +371,34 @@
         <button class="outline-button danger" id="resetLocal" type="button">Reset this device</button>
       </div>
       <p class="auth-note" id="timezoneNote"></p>
+    </dialog>
+
+    <dialog id="sharingDialog">
+      <div class="dialog-header"><div><p class="eyebrow">WHO SEES WHAT</p><h2>Your calendar, your call.</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <p class="dialog-copy">Your full calendar stays on this device. Friends and groups only ever get what you choose here.</p>
+      <label class="field-label" for="shareFriendsDefault">Friends see</label>
+      <select class="text-input" id="shareFriendsDefault"></select>
+      <p class="form-hint"><strong>Only events I pick</strong> shows the names of events you tap in Your calendar; everything else reads “Busy”.</p>
+      <p class="field-label">Change it for one friend</p>
+      <p class="form-hint" id="shareSignedOut" hidden>Sign in to share with friends. Friends need an account so only they can see it.</p>
+      <div class="share-friend-list" id="shareFriendList"></div>
+      <label class="field-label" for="shareGroups">Groups see</label>
+      <select class="text-input" id="shareGroups"></select>
+      <p class="form-hint" id="shareGroupsHint"></p>
+      <p class="field-label">Events you picked</p>
+      <div class="picked-list" id="pickedList"></div>
+      <button class="primary-button full" id="saveSharing" type="button">Save</button>
+    </dialog>
+
+    <dialog id="friendCalendarDialog" class="wide-dialog">
+      <div class="dialog-header"><div><p class="eyebrow">FRIEND</p><h2 id="friendCalendarTitle">Calendar</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <div class="week-switcher friend-week">
+        <button id="friendPrevWeek" aria-label="Previous week">‹</button>
+        <strong id="friendWeekLabel">This week</strong>
+        <button id="friendNextWeek" aria-label="Next week">›</button>
+        <small id="friendCalendarUpdated"></small>
+      </div>
+      <div id="friendAgenda"></div>
     </dialog>
 
     <dialog id="groupsDialog">

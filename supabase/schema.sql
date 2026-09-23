@@ -175,6 +175,96 @@ create policy "Either side can remove a request"
   );
 
 -- ---------------------------------------------------------------------------
+-- Calendar shares
+-- ---------------------------------------------------------------------------
+-- What one person lets one friend see of their calendar. The owner's browser
+-- decides the contents (busy blocks only, or with the event names they chose)
+-- and writes one row per friend; a friend set to "Nothing" simply has no row.
+-- Full calendars never reach the database, only these filtered copies.
+
+create table if not exists public.calendar_shares (
+  owner_id uuid not null references auth.users(id) on delete cascade,
+  viewer_id uuid not null references auth.users(id) on delete cascade,
+  events jsonb not null default '[]'::jsonb
+    check (jsonb_typeof(events) = 'array' and pg_column_size(events) < 200000),
+  updated_at timestamptz not null default now(),
+  primary key (owner_id, viewer_id),
+  constraint calendar_shares_not_self check (owner_id <> viewer_id)
+);
+
+create index if not exists calendar_shares_viewer on public.calendar_shares (viewer_id);
+
+alter table public.calendar_shares enable row level security;
+
+-- Only the two people on a row can read it.
+drop policy if exists "Shares are visible to owner and viewer" on public.calendar_shares;
+create policy "Shares are visible to owner and viewer"
+  on public.calendar_shares for select to authenticated
+  using (auth.uid() = owner_id or auth.uid() = viewer_id);
+
+-- Only the owner writes, and only to somebody who is actually their friend:
+-- an accepted request between the two, in either direction. The caller can
+-- read that request under its own policy, so no elevated function is needed.
+drop policy if exists "Owners share with their friends" on public.calendar_shares;
+create policy "Owners share with their friends"
+  on public.calendar_shares for insert to authenticated
+  with check (
+    auth.uid() = owner_id
+    and exists (
+      select 1 from public.friend_requests fr
+      where fr.status = 'accepted'
+        and ((fr.requester_id = owner_id and fr.recipient_id = viewer_id)
+          or (fr.requester_id = viewer_id and fr.recipient_id = owner_id))
+    )
+  );
+
+drop policy if exists "Owners update their shares" on public.calendar_shares;
+create policy "Owners update their shares"
+  on public.calendar_shares for update to authenticated
+  using (auth.uid() = owner_id)
+  with check (
+    auth.uid() = owner_id
+    and exists (
+      select 1 from public.friend_requests fr
+      where fr.status = 'accepted'
+        and ((fr.requester_id = owner_id and fr.recipient_id = viewer_id)
+          or (fr.requester_id = viewer_id and fr.recipient_id = owner_id))
+    )
+  );
+
+-- The owner can stop sharing at any time, and a viewer can drop a share they
+-- no longer want to see.
+drop policy if exists "Either side can remove a share" on public.calendar_shares;
+create policy "Either side can remove a share"
+  on public.calendar_shares for delete to authenticated
+  using (auth.uid() = owner_id or auth.uid() = viewer_id);
+
+-- A friendship that ends takes its shares with it.
+create or replace function public.drop_shares_for_ended_friendship()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if (tg_op = 'DELETE' and old.status = 'accepted')
+     or (tg_op = 'UPDATE' and old.status = 'accepted' and new.status <> 'accepted') then
+    delete from public.calendar_shares
+    where (owner_id = old.requester_id and viewer_id = old.recipient_id)
+       or (owner_id = old.recipient_id and viewer_id = old.requester_id);
+  end if;
+  return null;
+end;
+$$;
+
+revoke execute on function public.drop_shares_for_ended_friendship() from public, anon, authenticated;
+
+drop trigger if exists friend_requests_drop_shares on public.friend_requests;
+create trigger friend_requests_drop_shares
+  after update or delete on public.friend_requests
+  for each row execute function public.drop_shares_for_ended_friendship();
+
+-- ---------------------------------------------------------------------------
 -- Notes on tables this schema no longer creates
 -- ---------------------------------------------------------------------------
 -- Earlier prototypes had friendships, friend_invites and calendar_connections.
