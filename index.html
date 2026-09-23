@@ -22,6 +22,7 @@
           <a class="nav-item" href="#ideas"><span class="nav-icon">✣</span>Activity ideas</a>
         </nav>
         <div class="sidebar-bottom">
+          <button class="nav-item nav-button" id="groupsButton"><span class="nav-icon">◎</span>Your groups</button>
           <button class="nav-item nav-button" id="calendarButton"><span class="nav-icon">↗</span>Calendar links</button>
           <button class="nav-item nav-button" id="settingsButton"><span class="nav-icon">⚙</span>Settings</button>
           <button class="profile-card profile-button" id="accountButton" aria-label="Open your profile">
@@ -35,7 +36,7 @@
       <main class="main-content">
         <header class="topbar">
           <button class="mobile-menu" id="mobileMenu" aria-label="Open menu" aria-expanded="false">☰</button>
-          <div class="breadcrumb"><span>Workspace</span><b>/</b><strong id="workspaceName">Weekend crew</strong></div>
+          <div class="breadcrumb"><span>Group</span><b>/</b><button class="breadcrumb-switch" id="switchGroup" aria-label="Switch group"><strong id="workspaceName">Weekend crew</strong><span aria-hidden="true">⌄</span></button></div>
           <div class="top-actions">
             <button class="icon-button" id="activityButton" aria-label="Recent activity">♧<i id="activityDot" hidden></i></button>
             <button class="avatar avatar-lilac account-avatar" id="topAccountButton" aria-label="Open your profile">AM</button>
@@ -88,6 +89,12 @@
                 <h3 id="tentativeTitle"></h3>
                 <p id="tentativeTiming"></p>
                 <div class="suggestions" id="tentativeSuggestions"></div>
+                <div class="calendar-add" id="calendarAdd" hidden>
+                  <span>Add to your calendar</span>
+                  <a class="calendar-add-button" id="addToGoogle" href="#" target="_blank" rel="noopener">Google Calendar</a>
+                  <button class="calendar-add-button" type="button" id="downloadIcs">Apple / Outlook</button>
+                  <small id="calendarAddNote"></small>
+                </div>
               </div>
               <span class="tentative-badge" id="tentativeBadge">Not confirmed</span>
             </article>
@@ -182,7 +189,7 @@
       <form class="integration-form" id="icsForm">
         <div class="integration-option">
           <div class="integration-icon apple">●</div>
-          <div><strong>Apple / iCloud, Outlook, or any ICS link</strong><small>Paste the public or secret <em>.ics</em> address of a calendar.</small></div>
+          <div><strong>Apple / iCloud, Outlook, or any ICS link</strong><small>Paste the public or secret <em>.ics</em> address of a calendar. It refreshes by itself every time you open Gatherly. For Google, use Settings → your calendar → <em>Secret address in iCal format</em>.</small></div>
         </div>
         <label class="field-label" for="icsUrl">Calendar link</label>
         <input class="text-input" id="icsUrl" type="url" inputmode="url" placeholder="https://p1-calendars.icloud.com/published/…" />
@@ -337,6 +344,20 @@
         <button class="outline-button danger" id="resetLocal" type="button">Reset this device</button>
       </div>
       <p class="auth-note" id="timezoneNote"></p>
+    </dialog>
+
+    <dialog id="groupsDialog">
+      <div class="dialog-header"><div><p class="eyebrow">YOUR GROUPS</p><h2>Everywhere you plan.</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <div class="group-list" id="groupList"></div>
+      <p class="form-hint" id="groupsHint"></p>
+      <form id="newGroupForm">
+        <label class="field-label" for="newGroupName">Start a new group</label>
+        <div class="copy-row">
+          <input class="text-input" id="newGroupName" placeholder="Book club" required maxlength="40" />
+          <button class="primary-button" type="submit">Create</button>
+        </div>
+        <p class="form-hint">You'll get a private link to share. It ends in a random code, so nobody can find your group by guessing its name.</p>
+      </form>
     </dialog>
 
     <dialog id="activityDialog">

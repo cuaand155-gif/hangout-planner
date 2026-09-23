@@ -29,6 +29,7 @@ const TYPES = {
 const ROUTES = {
   "/api/workspace": () => import("../api/workspace.js"),
   "/api/calendar": () => import("../api/calendar.js"),
+  "/api/groups": () => import("../api/groups.js"),
 };
 
 /** Mimics the response helpers the handlers rely on (status/json/setHeader). */
