@@ -1,8 +1,8 @@
-# Gatherly
+# Waddle 🐧
 
 Find the time everyone is actually free, then fill it with something worth doing.
 
-Gatherly is a small, dependency-free web app. A group shares one link; each
+Waddle is a small, dependency-free web app. A group shares one link; each
 person marks when they're busy — by hand or by importing a calendar — and the
 planner shows the windows where everybody is free, ranked longest first. The
 group collects ideas and votes on them in the same place.
@@ -68,7 +68,7 @@ There are three ways, and none of them can put the same person in a group twice:
   stays available for the next group without re-inviting.
 
 If a friend you add is already in the group under a name somebody typed by
-hand, Gatherly offers to **link** that row to their account instead of adding
+hand, Waddle offers to **link** that row to their account instead of adding
 a duplicate. The rules for all of this live in `lib/membership.js` and are
 covered by tests.
 
@@ -85,7 +85,7 @@ the end, so nobody can find your group by guessing its name.
 - **Reading busy times.** Paste any calendar's `.ics` address under Calendar
   links — for Google, that's Settings → your calendar → *Secret address in
   iCal format*. Saved links refresh by themselves every time you open
-  Gatherly, or come back to the tab, if the last refresh is over 30 minutes
+  Waddle, or come back to the tab, if the last refresh is over 30 minutes
   old. A refresh that finds nothing new saves nothing.
 - **Adding the plan to your calendar.** Once a plan is pencilled in, the plan
   card offers **Google Calendar** and **Apple / Outlook**. The Apple/Outlook
@@ -132,7 +132,7 @@ See [DEPLOY.md](DEPLOY.md) for hosting, database and Google sign-in setup.
 - Google Calendar's direct connection lasts about an hour after signing in,
   because Supabase hands over Google's token only once. For hands-free syncing
   use the calendar's secret iCal address instead, which refreshes indefinitely.
-- Refreshing happens while Gatherly is open. Nothing syncs in the background
+- Refreshing happens while Waddle is open. Nothing syncs in the background
   while it's closed — that would mean the server holding everyone's calendar
   access long-term.
 - Calendar entries are converted from the timezone they were written in,

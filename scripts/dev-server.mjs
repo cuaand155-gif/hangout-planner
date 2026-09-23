@@ -125,6 +125,6 @@ const server = createServer(async (request, response) => {
 
 server.listen(PORT, () => {
   const configured = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
-  console.log(`Gatherly running at http://localhost:${PORT}`);
+  console.log(`Waddle running at http://localhost:${PORT}`);
   console.log(configured ? "Persistence: Supabase" : "Persistence: demo mode (no SUPABASE_* env vars set)");
 });
