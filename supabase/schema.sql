@@ -78,6 +78,11 @@ begin
 end;
 $$;
 
+-- Living in the public schema would also expose this at
+-- /rest/v1/rpc/handle_new_user. Postgres checks EXECUTE when a trigger is
+-- created rather than each time it fires, so the trigger still works.
+revoke execute on function public.handle_new_user() from public, anon, authenticated;
+
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
@@ -134,11 +139,19 @@ create policy "Users send their own requests"
   on public.friend_requests for insert to authenticated
   with check (
     auth.uid() = requester_id
+    and recipient_id is null
     and lower(recipient_email) <> lower(coalesce(auth.jwt() ->> 'email', ''))
   );
 
 -- Only the recipient answers a request, and answering cannot rewrite who it
--- was from or who it was for.
+-- was from or who it was for. A policy's WITH CHECK cannot see the old row, so
+-- the second half of that is enforced with column privileges: a signed-in
+-- caller may only ever update the three columns answering touches. Without
+-- this, a recipient could accept a request and restate it as coming from
+-- somebody else, inventing a friendship that person would then see.
+revoke update on public.friend_requests from authenticated, anon;
+grant update (status, recipient_id, responded_at) on public.friend_requests to authenticated;
+
 drop policy if exists "Recipients answer their requests" on public.friend_requests;
 create policy "Recipients answer their requests"
   on public.friend_requests for update to authenticated

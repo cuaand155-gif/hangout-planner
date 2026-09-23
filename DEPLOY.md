@@ -58,14 +58,23 @@ configuration — just the `friend_requests` table, which is in
 `supabase/schema.sql` from step 1. If you ran an earlier version of the schema,
 run it again; every statement is safe to repeat.
 
-Two things worth knowing about how it is secured:
+To confirm the policies are doing their job, run
+[`supabase/rls-test.sql`](supabase/rls-test.sql) in the SQL editor. It creates
+throwaway accounts inside a transaction, tries every way one account might
+reach another's requests, prints a pass/fail row for each, and rolls back.
+
+Three things worth knowing about how it is secured:
 
 - A request is addressed to an **email**, so you can invite somebody who has
   not signed up yet. The read policy therefore matches on the email inside the
   caller's own token, which means nobody can read requests by guessing at
   someone else's address.
-- Only the recipient can accept or decline, and the update policy does not let
-  that write change who the request was from or to.
+- Only the recipient can accept or decline.
+- A policy cannot compare against the old row, so "answering cannot rewrite who
+  the request was from" is enforced with column privileges: a signed-in caller
+  may only update `status`, `recipient_id` and `responded_at`. Without that, a
+  recipient could accept a request and restate it as coming from somebody else,
+  inventing a friendship that person would then see in their own list.
 
 The schema also adds a trigger that creates a `profiles` row for every new
 account, so requests show a name rather than a bare email address. Nobody is

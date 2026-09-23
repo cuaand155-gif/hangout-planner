@@ -33,6 +33,7 @@ runs in demo mode: a sample workspace, with your changes kept in this browser.
 | `api/workspace.js` | Loads and saves the shared workspace, with validation and conflict detection. |
 | `api/calendar.js` | Fetches a calendar feed server-side, with the guards an inbound URL needs. |
 | `supabase/schema.sql` | `workspaces`, plus `profiles` and `friend_requests` for people who sign in. |
+| `supabase/rls-test.sql` | Proves the friend-request policies hold; runs in a transaction and rolls back. |
 
 ### Availability
 
@@ -111,6 +112,6 @@ See [DEPLOY.md](DEPLOY.md) for hosting, database and Google sign-in setup.
   (Settings), and all times are displayed in each viewer's own timezone.
 - A friend request notifies nobody by email — it waits in the app until the
   recipient signs in. Tell them it's there, or just send the invite link.
-- The friend-request flows are covered by tests against a stubbed database.
-  They have not been run against a live Supabase project, so check the table
-  and its policies once after running the schema.
+- Friend requests notify nobody by email, as above. Everything else about them
+  has been run against the live database: `supabase/rls-test.sql` checks the
+  policies hold, and the app flows are covered by browser tests.
