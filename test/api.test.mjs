@@ -260,3 +260,90 @@ test("either the integration's variable names or the hand-made ones work", async
   assert.equal(result.body.persisted, true, "the integration's variable names are enough to persist");
   assert.match(asked, /^https:\/\/example\.supabase\.co\/rest\/v1\/workspaces/);
 });
+
+/** Sets env vars for one test and restores them afterwards. */
+function withEnv(t, values) {
+  const keys = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_SECRET_KEY"];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  for (const key of keys) delete process.env[key];
+  Object.assign(process.env, values);
+  t.after(() => {
+    for (const key of keys) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  });
+}
+
+test("an unreachable database is a JSON 502, not a crashed function", async (t) => {
+  withEnv(t, { SUPABASE_URL: "https://example.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "k" });
+  t.mock.method(console, "error", () => {});
+  t.mock.method(globalThis, "fetch", async () => {
+    throw new TypeError("fetch failed");
+  });
+  const result = await call(workspaceHandler, { method: "GET", query: { slug: "team" } });
+  assert.equal(result.status, 502);
+  assert.match(result.body.error, /database could not be reached/);
+  assert.equal(result.body.detail, "TypeError");
+  assert.doesNotMatch(JSON.stringify(result.body), /example\.supabase\.co|"k"/, "neither the URL nor the key leaks");
+});
+
+test("a non-JSON reply (a web page at the wrong URL) is a JSON 502, not a crash", async (t) => {
+  withEnv(t, { SUPABASE_URL: "https://example.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "k" });
+  t.mock.method(console, "error", () => {});
+  t.mock.method(globalThis, "fetch", async () => new Response("<!doctype html><p>dashboard</p>", { status: 200 }));
+  const result = await call(workspaceHandler, { method: "GET", query: { slug: "team" } });
+  assert.equal(result.status, 502);
+  assert.equal(result.body.detail, "SyntaxError");
+});
+
+test("a malformed SUPABASE_URL is skipped in favour of the integration's URL", async (t) => {
+  withEnv(t, {
+    SUPABASE_URL: "xgsskeblzggrhxumiwdl.supabase.co",
+    NEXT_PUBLIC_SUPABASE_URL: "https://good.supabase.co/",
+    SUPABASE_SERVICE_ROLE_KEY: "k",
+  });
+  let asked = null;
+  t.mock.method(globalThis, "fetch", async (url) => {
+    asked = String(url);
+    return new Response(JSON.stringify([{ slug: "team", state: { name: "Team" }, updated_at: "2026-09-21T10:00:00.000Z" }]), { status: 200 });
+  });
+  const result = await call(workspaceHandler, { method: "GET", query: { slug: "team" } });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.persisted, true);
+  assert.match(asked, /^https:\/\/good\.supabase\.co\/rest\/v1\//, "the trailing slash is trimmed and the good URL used");
+});
+
+test("the integration's URL wins when both look valid, since it is kept in sync", async (t) => {
+  withEnv(t, {
+    SUPABASE_URL: "https://stale.supabase.co",
+    NEXT_PUBLIC_SUPABASE_URL: "https://current.supabase.co",
+    SUPABASE_SERVICE_ROLE_KEY: "k",
+  });
+  let asked = null;
+  t.mock.method(globalThis, "fetch", async (url) => {
+    asked = String(url);
+    return new Response("[]", { status: 200 });
+  });
+  await call(workspaceHandler, { method: "GET", query: { slug: "team" } });
+  assert.match(asked, /^https:\/\/current\.supabase\.co\//);
+});
+
+test("with no usable URL at all the API reports demo mode instead of failing", async (t) => {
+  withEnv(t, { SUPABASE_URL: "not a url", SUPABASE_SERVICE_ROLE_KEY: "k" });
+  const result = await call(workspaceHandler, { method: "GET", query: { slug: "team" } });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.persisted, false);
+  assert.match(result.body.reason, /SUPABASE_URL/);
+});
+
+test("the calendar endpoint also never crashes the function", async (t) => {
+  t.mock.method(console, "error", () => {});
+  // A body getter that throws stands in for any unexpected failure.
+  const request = { method: "POST", headers: {}, query: {} };
+  Object.defineProperty(request, "body", { get() { throw new Error("boom"); } });
+  const response = mockResponse();
+  await calendarHandler(request, response);
+  assert.equal(response.captured.status, 502);
+  assert.equal(response.captured.body.detail, "Error");
+});

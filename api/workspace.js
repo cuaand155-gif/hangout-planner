@@ -27,11 +27,25 @@ function send(response, status, body) {
   response.status(status).json(body);
 }
 
+/** Returns the value as a base URL if it is a usable https URL, else null. */
+function httpsBase(value) {
+  const raw = String(value || "").trim().replace(/\/+$/, "");
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw);
+    return parsed.protocol === "https:" ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
 // The Supabase/Vercel integration provisions NEXT_PUBLIC_SUPABASE_URL and
 // SUPABASE_SECRET_KEY; a hand-made setup usually has SUPABASE_URL and
-// SUPABASE_SERVICE_ROLE_KEY. Accept either so both paths work.
+// SUPABASE_SERVICE_ROLE_KEY. The integration's URL is preferred because it is
+// kept in sync automatically, and a value that is not a usable https URL is
+// skipped rather than trusted.
 function config() {
-  const url = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/+$/, "");
+  const url = httpsBase(process.env.NEXT_PUBLIC_SUPABASE_URL) || httpsBase(process.env.SUPABASE_URL);
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY || "";
   return url && key ? { url, key } : null;
 }
@@ -106,7 +120,7 @@ async function insertRow(url, key, slug, state) {
   return { row: rows[0] || null };
 }
 
-export default async function handler(request, response) {
+async function handle(request, response) {
   const slug = slugify(request.query?.slug);
   const settings = config();
 
@@ -241,4 +255,23 @@ export default async function handler(request, response) {
     });
   }
   return send(response, 200, { slug, state: normalizeWorkspaceState(rows[0].state), rev: rows[0].updated_at, persisted: true });
+}
+
+/**
+ * A throw here would surface as Vercel's opaque FUNCTION_INVOCATION_FAILED,
+ * so failures (an unreachable or mistyped database URL, a non-JSON reply)
+ * come back as a JSON 502 instead. Only the error's type is returned; the
+ * full error goes to the function logs.
+ */
+export default async function handler(request, response) {
+  try {
+    return await handle(request, response);
+  } catch (error) {
+    console.error("workspace handler failed:", error);
+    if (response.headersSent) return undefined;
+    return send(response, 502, {
+      error: "The database could not be reached. Check the Supabase URL and key on the host.",
+      detail: error?.name || "Error",
+    });
+  }
 }
