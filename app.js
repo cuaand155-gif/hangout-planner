@@ -56,6 +56,7 @@ import {
 import { checklistSteps, showChecklist } from "./lib/checklist.js";
 import { APPEARANCES, THEME_COLORS, normalizeAppearance, resolveTheme } from "./lib/appearance.js";
 import { initBookingOwner } from "./booking-owner.js";
+import { installMode, isStandalone, registerServiceWorker } from "./lib/pwa.js";
 import { REPEATS, applyRsvp, nextOccurrence, repeatLabel, rsvpAnswers, rsvpSummary, toggleTimeVote } from "./lib/hangout.js";
 
 // Browser-safe credentials: the publishable (anon) key is designed to ship in
@@ -3269,3 +3270,36 @@ async function loadRemoteProfile(user) {
 }
 
 start();
+
+/* Home screen app */
+
+let installPrompt = null;
+
+function renderInstallCard() {
+  const mode = installMode({ standalone: isStandalone(), canPrompt: Boolean(installPrompt), userAgent: navigator.userAgent, maxTouchPoints: navigator.maxTouchPoints });
+  $("installCard").hidden = mode === "none";
+  $("installButton").hidden = mode !== "prompt";
+  $("installSteps").innerHTML = mode === "ios"
+    ? `In Safari, tap Share ${svgIcon("share")} then <strong>Add to Home Screen</strong>.`
+    : "Opens like an app, full screen, no App Store.";
+}
+
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  installPrompt = event;
+  renderInstallCard();
+});
+window.addEventListener("appinstalled", () => {
+  installPrompt = null;
+  renderInstallCard();
+  showToast("Waddle is on your home screen.");
+});
+$("installButton").addEventListener("click", async () => {
+  if (!installPrompt) return;
+  const prompt = installPrompt;
+  installPrompt = null;
+  await prompt.prompt();
+  renderInstallCard();
+});
+renderInstallCard();
+registerServiceWorker();
