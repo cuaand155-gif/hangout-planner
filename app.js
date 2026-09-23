@@ -32,6 +32,9 @@ import {
 } from "./lib/planner.js";
 import { applyMembership, findMemberForParty, linkMemberToParty, normalizeEmail, planManualClaim, resolveMembership } from "./lib/membership.js";
 import { createFriendStore, describeParty, partitionRequests, profileIdsFor, rejectionFor } from "./lib/friends.js";
+import { buildPlanIcs, googleCalendarUrl, planUid } from "./lib/calendar-export.js";
+import { forgetGroup, mergeGroups, newGroupSlug, rememberGroup } from "./lib/groups.js";
+import { dueForSync, sameBusy } from "./lib/sync.js";
 
 // Browser-safe credentials: the publishable (anon) key is designed to ship in
 // client code. Row level security in supabase/schema.sql is what protects data.
@@ -52,6 +55,9 @@ const STORAGE = {
   sources: "gatherly-calendar-sources",
   seen: (slug) => `gatherly-activity-seen:${slug}`,
   googleToken: "gatherly-google-token",
+  groups: "gatherly-groups",
+  added: "gatherly-calendar-added",
+  pendingName: (slug) => `gatherly-new-group:${slug}`,
 };
 
 const supabaseClient = AUTH_CONFIG.configured && window.supabase
@@ -606,9 +612,55 @@ function renderPlan() {
   const suggestions = suggestionsForPlan(plan);
   $("tentativeSuggestions").innerHTML = suggestions.length
     ? `<span>Suggested windows</span>${suggestions
-        .map((window) => `<button type="button" data-window="${window.start.getTime()}">${escapeHtml(formatWindow(window))}</button>`)
+        .map((window) => `<button type="button" data-window="${window.start.getTime()}" data-window-end="${window.end.getTime()}">${escapeHtml(formatWindow(window))}</button>`)
         .join("")}`
     : '<span>No shared window in that range yet — add more times or widen the search.</span>';
+
+  renderCalendarAdd(plan);
+}
+
+/* Add to calendar */
+
+function addedRecords() {
+  return readJson(STORAGE.added, {});
+}
+
+/** The key names this plan at this exact time, so moving it re-enables adding. */
+function addedKey(plan) {
+  return `${planUid(plan, session.slug)}|${plan.chosen}|${plan.chosenEnd || ""}`;
+}
+
+function renderCalendarAdd(plan) {
+  const row = $("calendarAdd");
+  if (!plan?.chosen) {
+    row.hidden = true;
+    return;
+  }
+  row.hidden = false;
+  $("addToGoogle").href = googleCalendarUrl(plan, { url: inviteUrl() }) || "#";
+
+  const record = addedRecords()[addedKey(plan)] || {};
+  $("addToGoogle").textContent = record.google ? "Added to Google ✓" : "Google Calendar";
+  $("addToGoogle").classList.toggle("done", Boolean(record.google));
+  $("downloadIcs").textContent = record.ics ? "Downloaded ✓" : "Apple / Outlook";
+  $("downloadIcs").classList.toggle("done", Boolean(record.ics));
+  // Google's add link can't tell it's the same event, so say so plainly
+  // rather than letting a second tap quietly make a duplicate.
+  $("calendarAddNote").textContent = record.google
+    ? "Already added to Google from this device — only add again if you deleted it."
+    : record.ics
+      ? "Opening the file again updates the same event rather than adding another."
+      : "";
+}
+
+function markAdded(plan, kind) {
+  const records = addedRecords();
+  const key = addedKey(plan);
+  records[key] = { ...records[key], [kind]: new Date().toISOString() };
+  // Keep the record small: drop the oldest beyond 50 plans.
+  const entries = Object.entries(records).sort((a, b) => String(b[1].google || b[1].ics).localeCompare(String(a[1].google || a[1].ics)));
+  writeJson(STORAGE.added, Object.fromEntries(entries.slice(0, 50)));
+  renderCalendarAdd(plan);
 }
 
 function planScopeLabel(plan) {
@@ -784,7 +836,12 @@ function syncRange() {
 }
 
 /** Writes imported busy blocks into my member row, replacing the last import. */
-async function storeImportedBlocks(blocks, source, range) {
+/**
+ * Saves imported busy times over the previous import from the same source.
+ * Returns { count, changed }; when nothing changed nothing is saved, so an
+ * automatic refresh never touches the shared workspace or its activity feed.
+ */
+async function storeImportedBlocks(blocks, source, range, { quiet = false } = {}) {
   const wantsDetails = session.state.privacy === "details";
   const cleaned = blocks
     .map((block) => ({
@@ -794,6 +851,16 @@ async function storeImportedBlocks(blocks, source, range) {
     }))
     .filter((block) => !Number.isNaN(block.start.getTime()) && !Number.isNaN(block.end.getTime()) && block.end > block.start);
 
+  const mine = me();
+  if (mine) {
+    const nextBusy = normalizeWorkspaceState({
+      members: [{ ...mine, busy: replaceBusyRange(mine.busy, cleaned, { source, from: range.from, to: range.to }) }],
+    }).members[0].busy;
+    const nextCoverage = widenCoverage(mine.coverage, range.from, addDays(range.to, -1));
+    const coverageSame = mine.coverage && mine.coverage.from === nextCoverage.from && mine.coverage.to === nextCoverage.to;
+    if (coverageSame && sameBusy(mine.busy, nextBusy)) return { count: cleaned.length, changed: false };
+  }
+
   await mutate(
     (draft) => {
       const member = draft.members.find((entry) => entry.id === memberId);
@@ -802,12 +869,12 @@ async function storeImportedBlocks(blocks, source, range) {
       member.coverage = widenCoverage(member.coverage, range.from, addDays(range.to, -1));
       member.updatedAt = new Date().toISOString();
     },
-    { note: `${displayName()} synced a calendar` }
+    quiet ? undefined : { note: `${displayName()} synced a calendar` }
   );
-  return cleaned.length;
+  return { count: cleaned.length, changed: true };
 }
 
-async function importIcs(url, { silent = false } = {}) {
+async function importIcs(url, { silent = false, quiet = false } = {}) {
   const range = syncRange();
   const response = await fetch("/api/calendar", {
     method: "POST",
@@ -824,12 +891,13 @@ async function importIcs(url, { silent = false } = {}) {
     if (!silent) showToast(payload.error || "Could not read that calendar link.");
     return null;
   }
-  const count = await storeImportedBlocks(payload.blocks || [], "ics", range);
+  const { count, changed } = await storeImportedBlocks(payload.blocks || [], "ics", range, { quiet });
   if (!silent) showToast(count ? `Imported ${count} busy block${count === 1 ? "" : "s"}.` : "That calendar has no events in the next four weeks.");
+  importIcs.lastChanged = changed;
   return count;
 }
 
-async function syncGoogle({ silent = false } = {}) {
+async function syncGoogle({ silent = false, quiet = false } = {}) {
   const token = window.sessionStorage.getItem(STORAGE.googleToken);
   if (!token) {
     if (!silent) showToast("Connect Google Calendar first.");
@@ -870,7 +938,8 @@ async function syncGoogle({ silent = false } = {}) {
     }))
     .filter((block) => block.start && block.end);
 
-  const count = await storeImportedBlocks(blocks, "google", range);
+  const { count, changed } = await storeImportedBlocks(blocks, "google", range, { quiet });
+  syncGoogle.lastChanged = changed;
   const source = calendarSources.find((entry) => entry.type === "google");
   if (source) {
     source.syncedAt = new Date().toISOString();
@@ -887,8 +956,153 @@ function renderGoogleState() {
   button.textContent = connected ? "Synced" : "Connect";
   button.classList.toggle("connected", connected);
   $("googleCalendarState").textContent = connected
-    ? "Connected for this browser session. Busy times refresh when you sync."
+    ? "Connected for this browser session — refreshes by itself while you're signed in. For hands-free syncing, add your secret iCal address below too."
     : "Sync busy times and show schedule overlaps.";
+}
+
+/* Automatic calendar refresh */
+
+let autoSyncRunning = false;
+
+/**
+ * Re-imports every saved calendar that hasn't synced in the last half hour.
+ * Runs when the app opens and whenever the tab comes back into view. Quiet:
+ * no toasts for failures, no activity entries, and nothing is saved at all
+ * when the calendar hasn't changed.
+ */
+async function autoSyncCalendars() {
+  if (autoSyncRunning || !me()) return;
+  autoSyncRunning = true;
+  let changed = false;
+  try {
+    for (const source of calendarSources.filter((entry) => entry.type === "ics")) {
+      if (!dueForSync(source.syncedAt)) continue;
+      const count = await importIcs(source.url, { silent: true, quiet: true });
+      if (count === null) continue;
+      source.syncedAt = new Date().toISOString();
+      source.blocks = count;
+      changed = changed || importIcs.lastChanged;
+    }
+    const google = calendarSources.find((entry) => entry.type === "google");
+    if (window.sessionStorage.getItem(STORAGE.googleToken) && dueForSync(google?.syncedAt)) {
+      const count = await syncGoogle({ silent: true, quiet: true });
+      if (count !== null) changed = changed || syncGoogle.lastChanged;
+    }
+    saveSources();
+    if (changed) showToast("Your calendar was refreshed.");
+  } finally {
+    autoSyncRunning = false;
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") autoSyncCalendars();
+});
+
+/* Groups */
+
+const groupsState = { remote: [] };
+
+function localGroups() {
+  return readJson(STORAGE.groups, []);
+}
+
+function groupUrl(slug) {
+  const url = new URL(window.location.href);
+  url.search = slug === "weekend-crew" ? "" : `?w=${encodeURIComponent(slug)}`;
+  url.hash = "";
+  return url.toString();
+}
+
+/** Adds the open group to this browser's list, under its current name. */
+function recordVisit() {
+  writeJson(STORAGE.groups, rememberGroup(localGroups(), { slug: session.slug, name: session.state.name }));
+}
+
+async function loadRemoteGroups() {
+  const token = await accessToken();
+  if (!token) {
+    groupsState.remote = [];
+    return;
+  }
+  try {
+    const response = await fetch("/api/groups", { headers: { Authorization: `Bearer ${token}` } });
+    if (!response.ok) return;
+    const payload = await response.json();
+    groupsState.remote = Array.isArray(payload.groups) ? payload.groups : [];
+  } catch {
+    /* Offline: the local list still works. */
+  }
+}
+
+function renderGroups() {
+  const groups = mergeGroups(localGroups(), groupsState.remote);
+  $("groupList").innerHTML = groups.length
+    ? groups
+        .map((group) => {
+          const current = group.slug === session.slug;
+          const name = group.slug === session.slug ? session.state.name : group.name;
+          return `<a class="group-row${current ? " current" : ""}" href="${escapeAttribute(groupUrl(group.slug))}">
+            <span class="group-mark">${escapeHtml(initialsFor(name || group.slug))}</span>
+            <div><strong>${escapeHtml(name || group.slug)}</strong><small>${escapeHtml(group.onAccount ? "On your account" : "On this device")} · ${escapeHtml(formatRelative(group.at))}</small></div>
+            <span class="group-actions">${current ? '<span class="group-current">OPEN</span>' : ""}${
+              !current && !group.onAccount ? `<button type="button" data-forget-group="${escapeAttribute(group.slug)}" aria-label="Remove ${escapeAttribute(name || group.slug)} from this list">×</button>` : ""
+            }</span>
+          </a>`;
+        })
+        .join("")
+    : '<p class="form-hint">No groups yet.</p>';
+  $("groupsHint").textContent = ui.user
+    ? "Groups you've joined while signed in follow you to every device."
+    : "Groups you open on this device are listed here. Sign in to see them on your other devices too.";
+}
+
+async function openGroups() {
+  renderGroups();
+  openDialog(dialogs.groups);
+  await loadRemoteGroups();
+  renderGroups();
+}
+
+$("groupsButton").addEventListener("click", openGroups);
+$("switchGroup").addEventListener("click", openGroups);
+
+$("groupList").addEventListener("click", (event) => {
+  const forget = event.target.closest("[data-forget-group]");
+  if (!forget) return;
+  event.preventDefault();
+  writeJson(STORAGE.groups, forgetGroup(localGroups(), forget.dataset.forgetGroup));
+  renderGroups();
+});
+
+$("newGroupForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const name = $("newGroupName").value.trim();
+  if (!name) return;
+  const slug = newGroupSlug(name);
+  // The server names a new group after its link; carry the real name over so
+  // the first load can set it.
+  try {
+    window.sessionStorage.setItem(STORAGE.pendingName(slug), name);
+  } catch {
+    /* Without session storage the group keeps its link-derived name. */
+  }
+  window.location.href = groupUrl(slug);
+});
+
+/** Applies the name typed when the group was created, once. */
+async function applyPendingName() {
+  let pending = null;
+  try {
+    pending = window.sessionStorage.getItem(STORAGE.pendingName(session.slug));
+    window.sessionStorage.removeItem(STORAGE.pendingName(session.slug));
+  } catch {
+    return;
+  }
+  if (!pending || pending === session.state.name) return;
+  await mutate((draft) => {
+    draft.name = pending;
+  }, { note: `Group created: ${pending}` });
 }
 
 /* ------------------------------------------------------------- dialogs */
@@ -903,6 +1117,7 @@ const dialogs = {
   idea: $("ideaDialog"),
   settings: $("settingsDialog"),
   activity: $("activityDialog"),
+  groups: $("groupsDialog"),
 };
 
 const openDialog = (dialog) => {
@@ -1132,6 +1347,27 @@ $("copyInviteLink").addEventListener("click", () => shareInvite("Invite link rea
 $("planButton").addEventListener("click", () => {
   $("ideas").scrollIntoView({ behavior: "smooth", block: "start" });
   showToast("Good window — now pick something to do.");
+});
+
+$("addToGoogle").addEventListener("click", () => {
+  const plan = session.state.plan;
+  if (plan?.chosen) markAdded(plan, "google");
+});
+
+$("downloadIcs").addEventListener("click", () => {
+  const plan = session.state.plan;
+  const ics = plan && buildPlanIcs(plan, { slug: session.slug, url: inviteUrl() });
+  if (!ics) return;
+  const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `${session.slug}-plan.ics`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  markAdded(plan, "ics");
+  showToast("Calendar file ready — open it to add the plan.");
 });
 
 /* Privacy */
@@ -1414,6 +1650,8 @@ $("tentativePlanForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = new FormData(event.target);
   const plan = {
+    // A stable id lets calendars recognise this plan again when it moves.
+    id: session.state.plan?.id || createId("plan"),
     activity: String(form.get("activity") || "").trim(),
     location: String(form.get("location") || "").trim(),
     audience: String(form.get("audience") || session.state.name),
@@ -1444,8 +1682,18 @@ $("tentativeSuggestions").addEventListener("click", async (event) => {
   const button = event.target.closest("[data-window]");
   if (!button) return;
   const chosen = new Date(Number(button.dataset.window));
+  // A suggestion is the whole free stretch, which can be most of a day. The
+  // event itself runs for the group's own "shortest window" setting, and never
+  // past the end of the free stretch.
+  const windowEnd = button.dataset.windowEnd ? Number(button.dataset.windowEnd) : null;
+  const planLength = settings().minWindowHours * 3600 * 1000;
+  const chosenEnd = new Date(Math.min(chosen.getTime() + planLength, windowEnd || Infinity));
   await mutate((draft) => {
-    if (draft.plan) draft.plan.chosen = chosen.toISOString();
+    if (!draft.plan) return;
+    draft.plan.id = draft.plan.id || createId("plan");
+    draft.plan.chosen = chosen.toISOString();
+    draft.plan.chosenEnd = chosenEnd.toISOString();
+    draft.plan.updatedAt = new Date().toISOString();
   }, { note: `Pencilled in for ${formatDayStamp(chosen)} at ${formatClock(chosen)}` });
   showToast(`Pencilled in for ${formatDayStamp(chosen)} at ${formatClock(chosen)}.`);
 });
@@ -1992,6 +2240,7 @@ async function start() {
         await loadRemoteProfile(authSession.user);
         await ensureMembership();
         await loadFriends({ force: true });
+        loadRemoteGroups();
       } else {
         renderFriends();
       }
@@ -2002,7 +2251,10 @@ async function start() {
   }
 
   await loadWorkspace();
+  await applyPendingName();
+  recordVisit();
   await loadFriends();
+  autoSyncCalendars();
 
   // Coming back from the Google consent screen: pull busy times straight away.
   if (new URLSearchParams(window.location.search).has("calendar")) {

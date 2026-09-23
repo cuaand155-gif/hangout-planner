@@ -13,7 +13,7 @@ No build step, no frontend framework, no npm dependencies.
 
 ```bash
 npm run dev          # http://localhost:4173
-npm test             # 78 unit and API tests, no dependencies
+npm test             # 107 unit and API tests, no dependencies
 ```
 
 `npm run dev` serves the static files *and* the `/api` handlers, so the app
@@ -30,6 +30,10 @@ runs in demo mode: a sample workspace, with your changes kept in this browser.
 | `lib/ics.js` | A small iCalendar reader (recurrence rules, exceptions, all-day events). |
 | `lib/membership.js` | Decides which member row is you, so nobody ends up in a group twice. |
 | `lib/friends.js` | Friend requests: what belongs in each list, and the database calls. |
+| `lib/calendar-export.js` | Turns a pencilled-in plan into an `.ics` file or a Google Calendar link. |
+| `lib/groups.js` | The "Your groups" list, and unguessable links for new groups. |
+| `lib/sync.js` | When a saved calendar is due for a refresh, and whether a refresh changed anything. |
+| `api/groups.js` | Lists a signed-in person's groups, so the list follows them between devices. |
 | `api/workspace.js` | Loads and saves the shared workspace, with validation and conflict detection. |
 | `api/calendar.js` | Fetches a calendar feed server-side, with the guards an inbound URL needs. |
 | `supabase/schema.sql` | `workspaces`, plus `profiles` and `friend_requests` for people who sign in. |
@@ -68,6 +72,29 @@ hand, Gatherly offers to **link** that row to their account instead of adding
 a duplicate. The rules for all of this live in `lib/membership.js` and are
 covered by tests.
 
+### Groups
+
+Each group lives at its own link (`/?w=book-club-7fq2x`). **Your groups** (in
+the sidebar, or tap the group name at the top) lists every group you've opened
+on this device and, when you're signed in, every group your account belongs
+to on any device. **Start a new group** there: the link gets a random code on
+the end, so nobody can find your group by guessing its name.
+
+### Calendars
+
+- **Reading busy times.** Paste any calendar's `.ics` address under Calendar
+  links — for Google, that's Settings → your calendar → *Secret address in
+  iCal format*. Saved links refresh by themselves every time you open
+  Gatherly, or come back to the tab, if the last refresh is over 30 minutes
+  old. A refresh that finds nothing new saves nothing.
+- **Adding the plan to your calendar.** Once a plan is pencilled in, the plan
+  card offers **Google Calendar** and **Apple / Outlook**. The Apple/Outlook
+  file carries a fixed event ID, so opening it again after the plan moves
+  updates the same event. Google's add link can't do that, so the app
+  remembers you've added it and says so, instead of letting a second tap make
+  a duplicate. The event lasts as long as the group's "shortest window"
+  setting (2 hours by default), within the free stretch.
+
 ### Sharing and privacy
 
 - A workspace lives at `/?w=<slug>`. Anyone with the link can open it, add their
@@ -102,9 +129,12 @@ See [DEPLOY.md](DEPLOY.md) for hosting, database and Google sign-in setup.
 
 ## Known limitations
 
-- Google Calendar access lasts for the browser session. Supabase hands over the
-  Google token once, at sign-in, so after a reload you may need to reconnect
-  before syncing again. ICS links re-sync at any time.
+- Google Calendar's direct connection lasts about an hour after signing in,
+  because Supabase hands over Google's token only once. For hands-free syncing
+  use the calendar's secret iCal address instead, which refreshes indefinitely.
+- Refreshing happens while Gatherly is open. Nothing syncs in the background
+  while it's closed — that would mean the server holding everyone's calendar
+  access long-term.
 - Calendar entries carrying a timezone are read in *your* timezone. If your
   calendar is in a different timezone from the person reading it, those times
   will be off.
