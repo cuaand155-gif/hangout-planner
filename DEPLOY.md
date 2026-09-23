@@ -1,6 +1,6 @@
-# Deploy Gatherly
+# Deploy Waddle
 
-Gatherly has no build step. Deploy the project folder as-is, with `index.html`
+Waddle has no build step. Deploy the project folder as-is, with `index.html`
 at the site root. It works immediately in demo mode; the steps below turn it
 into a shared planner.
 
@@ -90,11 +90,11 @@ emailed: a request waits in the app until the recipient next signs in.
 ## 4. Google Calendar import (optional)
 
 Add the Calendar scope `https://www.googleapis.com/auth/calendar.readonly` to
-the same Google OAuth client. Gatherly requests it only when somebody clicks
+the same Google OAuth client. Waddle requests it only when somebody clicks
 **Connect** under Calendar links, and only ever reads.
 
 Supabase returns the Google access token once, on the sign-in callback, so the
-connection lasts for that browser session. Gatherly keeps that token in
+connection lasts for that browser session. Waddle keeps that token in
 `sessionStorage` — never in local storage, and never in the shared workspace.
 
 ICS links (iCloud, Outlook, Google's secret address) need no setup at all.

@@ -60,7 +60,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:4;opac
 
 .sidebar{background:var(--bg);border-right:0}
 .brand{font:600 27px/1 "Fraunces",Georgia,serif;letter-spacing:-.04em;gap:5px}
-.brand-mark{order:2;font-size:0;width:7px;height:7px;border-radius:50%;background:var(--purple);margin-top:8px}
+.brand-mark{font-size:22px;line-height:1}
 .nav-item{border-radius:12px;color:var(--muted);font-weight:500;transition:background-color .3s var(--ease),color .3s var(--ease),box-shadow .3s var(--ease)}
 .nav-item:hover{background:rgba(255,252,248,.65);color:var(--ink)}
 .nav-item.active{background:var(--surface);color:var(--ink);font-weight:600;box-shadow:var(--shadow)}

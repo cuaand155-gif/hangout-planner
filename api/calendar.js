@@ -93,7 +93,7 @@ async function fetchFeed(startUrl) {
       result = await fetch(target.href, {
         redirect: "manual",
         signal: controller.signal,
-        headers: { Accept: "text/calendar, text/plain, */*", "User-Agent": "Gatherly/1.0 (+calendar import)" },
+        headers: { Accept: "text/calendar, text/plain, */*", "User-Agent": "Waddle/1.0 (+calendar import)" },
       });
     } finally {
       clearTimeout(timer);

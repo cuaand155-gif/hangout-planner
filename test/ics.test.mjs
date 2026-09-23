@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatStamp, parseContentLine, parseDuration, parseIcs, parseIcsDate, unfold } from "../lib/ics.js";
+import { formatStamp, parseContentLine, parseDuration, parseIcs, parseIcsDate, resolveZone, unfold, wallClockToUtc } from "../lib/ics.js";
 
 const calendar = (...events) => ["BEGIN:VCALENDAR", "VERSION:2.0", ...events, "END:VCALENDAR"].join("\r\n");
 const WINDOW = { from: "2026-09-21T00:00:00Z", to: "2026-09-28T00:00:00Z", padHours: 0 };
@@ -63,9 +63,48 @@ test("an all-day event covers the whole local day", () => {
   assert.deepEqual(blocks, [{ start: "2026-09-22T00:00:00", end: "2026-09-23T00:00:00", allDay: true }]);
 });
 
-test("a TZID event is emitted as wall-clock time for the viewer's zone", () => {
+test("a TZID event is converted to the real UTC instant", () => {
   const blocks = parseIcs(calendar("BEGIN:VEVENT", "UID:1", "DTSTART;TZID=America/Toronto:20260921T090000", "DTEND;TZID=America/Toronto:20260921T100000", "END:VEVENT"), WINDOW);
-  assert.deepEqual(blocks, [{ start: "2026-09-21T09:00:00", end: "2026-09-21T10:00:00", allDay: false }]);
+  assert.deepEqual(blocks, [{ start: "2026-09-21T13:00:00Z", end: "2026-09-21T14:00:00Z", allDay: false }]);
+
+  const paris = parseIcs(calendar("BEGIN:VEVENT", "UID:2", "DTSTART;TZID=Europe/Paris:20260922T090000", "DTEND;TZID=Europe/Paris:20260922T100000", "END:VEVENT"), WINDOW);
+  assert.equal(paris[0].start, "2026-09-22T07:00:00Z");
+});
+
+test("Windows and prefixed zone names resolve; unknown ones stay wall-clock", () => {
+  assert.equal(resolveZone("Eastern Standard Time"), "America/New_York");
+  assert.equal(resolveZone("/mozilla.org/20070129_1/Europe/Paris"), "Europe/Paris");
+  assert.equal(resolveZone("Nowhere/Special"), null);
+  const unknown = parseIcs(calendar("BEGIN:VEVENT", "UID:1", "DTSTART;TZID=Nowhere/Special:20260921T090000", "DTEND;TZID=Nowhere/Special:20260921T100000", "END:VEVENT"), WINDOW);
+  assert.equal(unknown[0].start, "2026-09-21T09:00:00");
+  const outlook = parseIcs(calendar("BEGIN:VEVENT", "UID:2", "DTSTART;TZID=Pacific Standard Time:20260921T090000", "DTEND;TZID=Pacific Standard Time:20260921T100000", "END:VEVENT"), WINDOW);
+  assert.equal(outlook[0].start, "2026-09-21T16:00:00Z");
+});
+
+test("a zoned weekly event keeps its local time across a daylight-saving change", () => {
+  const blocks = parseIcs(
+    calendar("BEGIN:VEVENT", "UID:1", "DTSTART;TZID=America/Toronto:20261026T090000", "DTEND;TZID=America/Toronto:20261026T100000", "RRULE:FREQ=WEEKLY", "END:VEVENT"),
+    { from: "2026-10-26T00:00:00Z", to: "2026-11-10T00:00:00Z", padHours: 0 }
+  );
+  assert.deepEqual(blocks.map((block) => block.start), ["2026-10-26T13:00:00Z", "2026-11-02T14:00:00Z", "2026-11-09T14:00:00Z"]);
+});
+
+test("UTC UNTIL and EXDATE apply to zoned occurrences by instant", () => {
+  const blocks = parseIcs(
+    calendar(
+      "BEGIN:VEVENT", "UID:1", "DTSTART;TZID=America/Toronto:20260921T200000", "DTEND;TZID=America/Toronto:20260921T210000",
+      "RRULE:FREQ=DAILY;UNTIL=20260924T000000Z", "EXDATE:20260923T000000Z", "END:VEVENT"
+    ),
+    WINDOW
+  );
+  // 8 PM Toronto is midnight UTC: the 22nd is excluded, and UNTIL keeps the 23rd.
+  assert.deepEqual(blocks.map((block) => block.start), ["2026-09-22T00:00:00Z", "2026-09-24T00:00:00Z"]);
+});
+
+test("wallClockToUtc handles the skipped and repeated hours", () => {
+  // 2:30 AM on 8 March 2026 does not exist in Toronto; 1:30 AM on 1 Nov 2026 happens twice.
+  assert.equal(new Date(wallClockToUtc(Date.UTC(2026, 2, 8, 2, 30), "America/Toronto")).toISOString(), "2026-03-08T07:30:00.000Z");
+  assert.equal(new Date(wallClockToUtc(Date.UTC(2026, 10, 1, 1, 30), "America/Toronto")).toISOString(), "2026-11-01T05:30:00.000Z");
 });
 
 test("a weekly rule expands across the window and keeps its duration", () => {
