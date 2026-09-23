@@ -25,6 +25,7 @@ import {
   slotRange,
   slugify,
   startOfWeek,
+  stateTooLarge,
   timeZoneLabel,
   timeZoneOffsetLabel,
   voteCount,
@@ -35,7 +36,7 @@ import { createFriendStore, describeParty, partitionRequests, profileIdsFor, rej
 import { buildPlanIcs, googleCalendarUrl, planUid } from "./lib/calendar-export.js";
 import { forgetGroup, mergeGroups, newGroupSlug, rememberGroup } from "./lib/groups.js";
 import { dueForSync, sameBusy } from "./lib/sync.js";
-import { isSafeImageDataUrl, squareCrop } from "./lib/avatar.js";
+import { IDEA_PHOTO_HEIGHT, IDEA_PHOTO_MAX_LENGTH, IDEA_PHOTO_WIDTH, coverCrop, isSafeImageDataUrl, squareCrop } from "./lib/avatar.js";
 import { PALETTES, normalizePalette } from "./lib/palettes.js";
 
 // Browser-safe credentials: the publishable (anon) key is designed to ship in
@@ -236,11 +237,25 @@ function mutate(apply, options) {
   return next;
 }
 
-async function applyAndSave(apply, { note } = {}) {
-  const draft = structuredClone(session.state);
-  apply(draft, session.state);
+const TOO_LARGE_MESSAGE = "This group is out of room — remove a photo from another idea, then try again.";
+
+/** The state after `apply`, or null when it would be too big to save. */
+function nextStateFrom(base, apply, note) {
+  const draft = structuredClone(base);
+  apply(draft, base);
   if (note) draft.activity = [{ message: note, at: new Date().toISOString() }, ...(draft.activity || [])];
-  session.state = normalizeWorkspaceState(draft);
+  const next = normalizeWorkspaceState(draft);
+  return stateTooLarge(next) ? null : next;
+}
+
+async function applyAndSave(apply, { note } = {}) {
+  let before = session.state;
+  const next = nextStateFrom(before, apply, note);
+  if (!next) {
+    showToast(TOO_LARGE_MESSAGE);
+    return false;
+  }
+  session.state = next;
   ui.saving = true;
   render();
   writeJson(STORAGE.cache(session.slug), session.state);
@@ -285,15 +300,31 @@ async function applyAndSave(apply, { note } = {}) {
       // Somebody else saved first: rebase this edit onto their version.
       const rebased = normalizeWorkspaceState(payload.state);
       session.rev = payload.rev || null;
-      const next = structuredClone(rebased);
-      apply(next, rebased);
-      if (note) next.activity = [{ message: note, at: new Date().toISOString() }, ...(next.activity || [])];
-      session.state = normalizeWorkspaceState(next);
+      before = rebased;
+      const retried = nextStateFrom(rebased, apply, note);
+      if (retried) {
+        session.state = retried;
+        render();
+        continue;
+      }
+      ui.saving = false;
+      session.state = rebased;
+      writeJson(STORAGE.cache(session.slug), session.state);
       render();
-      continue;
+      showToast(TOO_LARGE_MESSAGE);
+      return false;
     }
 
     ui.saving = false;
+    if (response.status === 413) {
+      // Too big for the server: undo the edit rather than keep a copy on this
+      // device that can never be saved.
+      session.state = before;
+      writeJson(STORAGE.cache(session.slug), session.state);
+      render();
+      showToast(TOO_LARGE_MESSAGE);
+      return false;
+    }
     if (response.status === 403) {
       session.state = payload.state ? normalizeWorkspaceState(payload.state) : session.state;
       session.rev = payload.rev || session.rev;
@@ -688,8 +719,12 @@ function renderIdeas() {
       const voted = hasVoted(idea, memberId);
       const count = voteCount(idea);
       const tag = idea.tag || (count && count === top ? "POPULAR" : "IDEA");
+      const photo = safeImageUrl(idea.photo);
+      const tile = photo
+        ? `<div class="idea-image ${style.key} has-photo" style="background-image:url('${escapeAttribute(photo)}')">`
+        : `<div class="idea-image ${style.key}"><span>${style.emoji}</span>`;
       return `<article class="idea-card${count && count === top ? " selected-idea" : ""}">
-        <div class="idea-image ${style.key}"><span>${style.emoji}</span>
+        ${tile}
           <button class="idea-edit" data-edit-idea="${escapeAttribute(idea.id)}" aria-label="Edit ${escapeAttribute(idea.title)}">${svgIcon("pencil")}</button>
           <button class="heart${voted ? " voted" : ""}" data-vote-idea="${escapeAttribute(idea.id)}" aria-pressed="${voted}" aria-label="${voted ? "Remove your vote for" : "Vote for"} ${escapeAttribute(idea.title)}">${svgIcon(voted ? "heart-fill" : "heart")}</button>
         </div>
@@ -2190,12 +2225,71 @@ function openIdeaDialog(idea) {
   $("ideaStyle").innerHTML = IDEA_STYLES.map(
     (style) => `<option value="${style.key}"${idea?.style === style.key ? " selected" : ""}>${style.emoji} ${style.key}</option>`
   ).join("");
+  previewIdeaPhoto(idea?.photo);
   $("ideaSubmit").textContent = idea ? "Save idea" : "Add idea";
   $("deleteIdea").hidden = !idea;
   openDialog(dialogs.idea);
 }
 
 $("addIdea").addEventListener("click", () => openIdeaDialog(null));
+
+function previewIdeaPhoto(value) {
+  const photo = isSafeImageDataUrl(value, IDEA_PHOTO_MAX_LENGTH) ? value : "";
+  $("ideaPhotoData").value = photo;
+  $("ideaPhotoPreview").style.backgroundImage = photo ? `url("${photo}")` : "";
+  $("ideaPhotoPreview").classList.toggle("has-photo", Boolean(photo));
+  $("chooseIdeaPhotoLabel").textContent = photo ? "Change photo" : "Choose photo";
+  $("removeIdeaPhoto").hidden = !photo;
+}
+
+/**
+ * Crops to a 16:10 cover, scales to at most 720x450 and encodes as JPEG,
+ * stepping the quality down until it fits the idea-photo cap. Returns "" when
+ * even the lowest quality is too big.
+ */
+async function ideaPhotoFileToDataUrl(file) {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const crop = coverCrop(bitmap.width, bitmap.height, IDEA_PHOTO_WIDTH, IDEA_PHOTO_HEIGHT);
+    const canvas = document.createElement("canvas");
+    canvas.width = crop.width;
+    canvas.height = crop.height;
+    const context = canvas.getContext("2d");
+    // JPEG has no transparency: see-through PNGs get a paper background, not black.
+    context.fillStyle = "#fffcf8";
+    context.fillRect(0, 0, crop.width, crop.height);
+    context.drawImage(bitmap, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, crop.width, crop.height);
+    for (const quality of [0.75, 0.6, 0.5]) {
+      const dataUrl = canvas.toDataURL("image/jpeg", quality);
+      if (isSafeImageDataUrl(dataUrl, IDEA_PHOTO_MAX_LENGTH)) return dataUrl;
+    }
+    return "";
+  } finally {
+    bitmap.close?.();
+  }
+}
+
+$("chooseIdeaPhoto").addEventListener("click", () => $("ideaPhotoFile").click());
+
+$("ideaPhotoFile").addEventListener("change", async (event) => {
+  const [file] = event.target.files || [];
+  event.target.value = "";
+  if (!file) return;
+  let dataUrl;
+  try {
+    dataUrl = await ideaPhotoFileToDataUrl(file);
+  } catch {
+    showToast("That photo couldn’t be read. Try a JPEG or PNG.");
+    return;
+  }
+  if (!dataUrl) {
+    showToast("That photo is too detailed to fit. Try a different one.");
+    return;
+  }
+  previewIdeaPhoto(dataUrl);
+});
+
+$("removeIdeaPhoto").addEventListener("click", () => previewIdeaPhoto(""));
 
 $("ideaForm").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -2207,18 +2301,25 @@ $("ideaForm").addEventListener("submit", async (event) => {
     style: $("ideaStyle").value,
   };
   if (!fields.title) return;
+  const photo = $("ideaPhotoData").value;
   const editingId = ui.editingIdeaId;
-  await mutate(
-    (draft) => {
-      if (editingId) {
-        const idea = draft.ideas.find((entry) => entry.id === editingId);
-        if (idea) Object.assign(idea, fields);
-        return;
-      }
-      draft.ideas.push({ ...fields, id: createId("idea"), votes: [memberId], createdAt: new Date().toISOString() });
-    },
-    { note: editingId ? `Idea updated: ${fields.title}` : `New idea: ${fields.title}` }
-  );
+  const apply = (draft) => {
+    if (editingId) {
+      const idea = draft.ideas.find((entry) => entry.id === editingId);
+      if (!idea) return;
+      Object.assign(idea, fields);
+      if (photo) idea.photo = photo;
+      else delete idea.photo;
+      return;
+    }
+    draft.ideas.push({ ...fields, ...(photo ? { photo } : {}), id: createId("idea"), votes: [memberId], createdAt: new Date().toISOString() });
+  };
+  // Checked here too so the dialog, and the chosen photo, stay open.
+  if (!nextStateFrom(session.state, apply)) {
+    showToast(TOO_LARGE_MESSAGE);
+    return;
+  }
+  await mutate(apply, { note: editingId ? `Idea updated: ${fields.title}` : `New idea: ${fields.title}` });
   dialogs.idea.close();
   showToast(editingId ? "Idea updated." : "Idea added — your vote is on it.");
 });
