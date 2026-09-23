@@ -337,6 +337,11 @@
         <input class="text-input" id="ideaTag" placeholder="COZY" maxlength="24" />
         <label class="field-label" for="ideaStyle">Card colour</label>
         <select class="text-input" id="ideaStyle"></select>
+        <span class="field-label">Photo</span>
+        <div class="idea-photo-editor">
+          <div class="idea-photo-preview" id="ideaPhotoPreview" aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#i-image"/></svg></div>
+          <div><div class="photo-actions"><button class="outline-button" id="chooseIdeaPhoto" type="button"><svg class="icon" aria-hidden="true"><use href="#i-image"/></svg><span id="chooseIdeaPhotoLabel">Choose photo</span></button><button class="text-button" id="removeIdeaPhoto" type="button" hidden><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg>Remove</button></div><input id="ideaPhotoFile" type="file" accept="image/*" hidden /><input id="ideaPhotoData" type="hidden" /><small class="form-hint">Optional. Opens your photo library or camera, and replaces the card colour.</small></div>
+        </div>
         <button class="primary-button full" type="submit" id="ideaSubmit">Add idea</button>
         <button class="outline-button full danger" type="button" id="deleteIdea" hidden>Delete this idea</button>
       </form>

@@ -266,3 +266,15 @@ dialog[open]{animation:gatherly-dialog .32s var(--ease)}
 .checklist-step{gap:10px;padding:12px}
 .checklist-step .outline-button{padding:9px 12px}
 }
+/* Idea photos — a 16:10 cover on the card tile, chosen in the idea dialog. */
+.idea-image.has-photo{background-color:var(--bg);background-size:cover;background-position:center;background-repeat:no-repeat;overflow:hidden}
+.idea-image.has-photo::after{content:"";position:absolute;inset:0;border-radius:inherit;background:linear-gradient(180deg,rgba(35,28,23,.2),rgba(35,28,23,0) 42%);pointer-events:none}
+.idea-image.has-photo .heart,.idea-image.has-photo .idea-edit{z-index:1;background:color-mix(in srgb,var(--surface) 90%,transparent);box-shadow:0 1px 2px rgba(35,28,23,.12),0 6px 14px -4px rgba(35,28,23,.3);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.idea-photo-editor{display:flex;gap:13px;align-items:flex-start}
+.idea-photo-editor>div:last-child{flex:1;min-width:0}
+.idea-photo-editor .photo-actions{flex-wrap:wrap;row-gap:6px}
+.idea-photo-preview{width:112px;aspect-ratio:16/10;flex:none;border-radius:14px;background:var(--lavender) center/cover no-repeat;color:var(--purple);display:grid;place-items:center;transition:box-shadow .3s var(--ease)}
+.idea-photo-preview .icon{width:22px;height:22px;opacity:.75}
+.idea-photo-preview.has-photo{box-shadow:var(--shadow)}.idea-photo-preview.has-photo .icon{display:none}
+.photo-actions .text-button .icon{width:14px;height:14px}
+@media(max-width:620px){.idea-photo-preview{width:96px}}
