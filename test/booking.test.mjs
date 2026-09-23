@@ -107,3 +107,16 @@ test("guest and owner calendar files share one UID per booking", () => {
   assert.match(feed, /SUMMARY:Chat: Sam\; Lee/);
   assert.match(feed, /UID:booking-b2@gatherly[\s\S]*STATUS:CANCELLED/);
 });
+
+test("owner links: share page, webcal feed and Google subscribe link", async () => {
+  const { bookingLinks, suggestHandle } = await import("../lib/booking.js");
+  const links = bookingLinks("https://waddle.example/", "alexi-7fq2x", "abc123");
+  assert.equal(links.page, "https://waddle.example/book/alexi-7fq2x");
+  assert.equal(links.webcal, "webcal://waddle.example/api/book?feed=abc123");
+  assert.ok(links.google.startsWith("https://calendar.google.com/calendar/r?cid=webcal%3A%2F%2Fwaddle.example"));
+  assert.equal(bookingLinks("https://w.example", "x-yz", "").webcal, "");
+  let i = 0;
+  const handle = suggestHandle("Alexi Cüa!", () => (i++ % 10) / 10);
+  assert.match(handle, /^alexi-cua-[a-z0-9]{5}$/);
+  assert.match(suggestHandle(""), /^me-[a-z0-9]{5}$/);
+});

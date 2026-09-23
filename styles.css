@@ -344,3 +344,19 @@ dialog[open]{animation:gatherly-dialog .32s var(--ease)}
 .booking-hint{font-size:12px;margin-top:18px}.booking-hint a{color:var(--purple);font-weight:600}
 @media(prefers-reduced-motion:no-preference){.booking-card{animation:gatherly-rise .6s var(--ease) both}}
 @media(max-width:620px){.booking-card{padding:22px 18px;border-radius:24px}.booking-shell{padding-top:24px}}
+
+/* Booking link dialog (owner side) */
+dialog.wide-dialog{width:min(560px,calc(100% - 32px))}
+.booking-share,.booking-feed,.booking-upcoming{margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+.booking-share{margin-top:0;padding-top:0;border-top:0;margin-bottom:6px}
+.booking-modes{margin:0 0 6px}
+.weekday-picker{display:flex;gap:6px;flex-wrap:wrap}
+.weekday-chip input{position:absolute;opacity:0;pointer-events:none}
+.weekday-chip span{display:inline-block;min-width:46px;text-align:center;padding:8px 10px;border-radius:999px;background:var(--bg);color:var(--muted);font-size:12px;font-weight:600;cursor:pointer;transition:background-color .2s var(--ease),color .2s var(--ease)}
+.weekday-chip input:checked+span{background:var(--ink);color:var(--surface)}
+.weekday-chip input:focus-visible+span{outline:2px solid var(--purple);outline-offset:2px}
+.picked-row{display:grid;grid-template-columns:1.3fr 1fr 1fr auto;gap:8px;align-items:center}
+.picked-list{display:grid;gap:7px;margin-top:10px}
+.booking-feed-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.booking-note{font-style:italic}
+@media(max-width:620px){.picked-row{grid-template-columns:1fr 1fr}.picked-row input[type=date]{grid-column:1/-1}}

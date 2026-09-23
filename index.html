@@ -25,6 +25,7 @@
           <a class="nav-item" href="#ideas"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-sparkle"/></svg></span>Activity ideas</a>
         </nav>
         <div class="sidebar-bottom">
+          <button class="nav-item nav-button" id="bookingButton"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg></span>Booking link</button>
           <button class="nav-item nav-button" id="groupsButton"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-groups"/></svg></span>Your groups</button>
           <button class="nav-item nav-button" id="calendarButton"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></span>Calendar links</button>
           <button class="nav-item nav-button" id="settingsButton"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-gear"/></svg></span>Settings</button>
@@ -372,6 +373,84 @@
         <button class="outline-button danger" id="resetLocal" type="button">Reset this device</button>
       </div>
       <p class="auth-note" id="timezoneNote"></p>
+    </dialog>
+
+    <dialog id="bookingDialog" class="wide-dialog">
+      <div class="dialog-header"><div><p class="eyebrow">BOOKING LINK</p><h2>Let people book time with you.</h2></div><button class="close-dialog" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+      <p class="dialog-copy">One link for work or anyone outside your friend groups. They only ever see open times — never your events or what you're doing. No account needed on their side.</p>
+
+      <div id="bookingSignedOut" hidden>
+        <p class="form-hint">Sign in first so your booking link and bookings are tied to you.</p>
+        <button class="primary-button full" type="button" id="bookingSignIn">Sign in with Google</button>
+      </div>
+
+      <div id="bookingShare" class="booking-share" hidden>
+        <label class="field-label" for="bookingShareLink">Your link</label>
+        <div class="copy-row"><input class="text-input" id="bookingShareLink" readonly /><button class="outline-button" type="button" id="bookingCopy"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg> Copy</button></div>
+        <p class="form-hint" id="bookingOffNote" hidden>Your link is turned off. People who open it see that it's unavailable.</p>
+      </div>
+
+      <form id="bookingSettingsForm" hidden>
+        <div class="setting-grid">
+          <div><label class="field-label" for="bookingHandle">Link name</label><input class="text-input" id="bookingHandle" required pattern="[a-z0-9][a-z0-9-]{2,47}" maxlength="48" autocomplete="off" /></div>
+          <div><label class="field-label" for="bookingOwnerName">Your name, as guests see it</label><input class="text-input" id="bookingOwnerName" maxlength="60" /></div>
+        </div>
+        <label class="field-label" for="bookingPageTitle">What are they booking?</label>
+        <input class="text-input" id="bookingPageTitle" maxlength="80" placeholder="Coffee chat" required />
+
+        <p class="field-label">Which times can people book?</p>
+        <div class="privacy-options booking-modes">
+          <label class="privacy-option"><input type="radio" name="bookingMode" value="free" checked /><span class="radio"></span><span><strong>All my free time</strong><small>Inside the days and hours below, minus anything busy on your calendar and anything already booked.</small></span></label>
+          <label class="privacy-option"><input type="radio" name="bookingMode" value="picked" /><span class="radio"></span><span><strong>Only times I pick</strong><small>Nothing is bookable except the times you add here.</small></span></label>
+        </div>
+
+        <div id="bookingFreeOptions">
+          <p class="field-label">Days</p>
+          <div class="weekday-picker" id="bookingWeekdays"></div>
+          <div class="setting-grid">
+            <div><label class="field-label" for="bookingDayStart">From</label><select class="text-input" id="bookingDayStart"></select></div>
+            <div><label class="field-label" for="bookingDayEnd">Until</label><select class="text-input" id="bookingDayEnd"></select></div>
+          </div>
+        </div>
+
+        <div id="bookingPickedOptions" hidden>
+          <p class="field-label">Your bookable times</p>
+          <div class="picked-row">
+            <input class="text-input" type="date" id="pickedDate" aria-label="Date" />
+            <input class="text-input" type="time" id="pickedStart" step="900" aria-label="From" value="10:00" />
+            <input class="text-input" type="time" id="pickedEnd" step="900" aria-label="Until" value="12:00" />
+            <button class="outline-button" type="button" id="pickedAdd"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg> Add</button>
+          </div>
+          <div class="picked-list" id="pickedList"></div>
+        </div>
+
+        <div class="setting-grid">
+          <div><label class="field-label" for="bookingDuration">Meeting length</label><select class="text-input" id="bookingDuration"></select></div>
+          <div><label class="field-label" for="bookingBuffer">Gap between meetings</label><select class="text-input" id="bookingBuffer"></select></div>
+          <div><label class="field-label" for="bookingNotice">Earliest booking</label><select class="text-input" id="bookingNotice"></select></div>
+          <div><label class="field-label" for="bookingWindow">How far ahead</label><select class="text-input" id="bookingWindow"></select></div>
+        </div>
+
+        <label class="schedule-toggle"><input type="checkbox" id="bookingUseCalendars" checked /><span><strong>Keep my calendar's busy times blocked</strong><small id="bookingCalendarsNote">Uses the calendar links you've added, checked by the server so it stays fresh even while Waddle is closed. Only you can see these links.</small></span></label>
+        <label class="schedule-toggle"><input type="checkbox" id="bookingActive" checked /><span><strong>Link is on</strong><small>Turn off to stop new bookings without losing your settings.</small></span></label>
+        <p class="form-hint">Times use your time zone: <strong id="bookingZone"></strong></p>
+        <button class="primary-button full" type="submit" id="bookingSave">Save booking link</button>
+      </form>
+
+      <div id="bookingFeed" class="booking-feed" hidden>
+        <p class="field-label">Put bookings in your calendar</p>
+        <p class="form-hint">Subscribe once and every booking shows up in your calendar by itself — cancellations disappear too. Google checks subscribed calendars every few hours; Apple lets you choose every 5 minutes.</p>
+        <div class="booking-feed-actions">
+          <a class="outline-button" id="bookingFeedGoogle" target="_blank" rel="noopener"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg> Add to Google Calendar</a>
+          <a class="outline-button" id="bookingFeedApple"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg> Add to Apple Calendar</a>
+          <button class="text-button" type="button" id="bookingFeedCopy">Copy link</button>
+        </div>
+      </div>
+
+      <div id="bookingUpcoming" class="booking-upcoming" hidden>
+        <p class="field-label">Upcoming bookings</p>
+        <div class="friend-list" id="bookingList"></div>
+      </div>
     </dialog>
 
     <dialog id="groupsDialog">

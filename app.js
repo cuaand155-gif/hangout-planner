@@ -40,6 +40,7 @@ import { IDEA_PHOTO_HEIGHT, IDEA_PHOTO_MAX_LENGTH, IDEA_PHOTO_WIDTH, coverCrop, 
 import { PALETTES, normalizePalette } from "./lib/palettes.js";
 import { checklistSteps, showChecklist } from "./lib/checklist.js";
 import { APPEARANCES, THEME_COLORS, normalizeAppearance, resolveTheme } from "./lib/appearance.js";
+import { initBookingOwner } from "./booking-owner.js";
 
 // Browser-safe credentials: the publishable (anon) key is designed to ship in
 // client code. Row level security in supabase/schema.sql is what protects data.
@@ -460,7 +461,7 @@ function renderChrome() {
   const radio = document.querySelector(`input[name="privacy"][value="${session.state.privacy}"]`);
   if (radio) {
     radio.checked = true;
-    for (const option of document.querySelectorAll(".privacy-option")) {
+    for (const option of document.querySelectorAll("#privacyDialog .privacy-option")) {
       option.classList.toggle("active", option.contains(radio));
     }
   }
@@ -1393,6 +1394,18 @@ for (const button of document.querySelectorAll(".close-dialog")) {
   button.addEventListener("click", () => button.closest("dialog").close());
 }
 
+const bookingOwner = initBookingOwner({
+  supabase: supabaseClient,
+  user: () => ui.user,
+  displayName: () => displayName(),
+  calendarLinks: () => calendarSources.map((source) => source.url).filter((url) => /^(https|webcal):\/\//i.test(String(url || ""))),
+  showToast: (message) => showToast(message),
+  openDialog: (dialog) => openDialog(dialog),
+  openAccount: () => openDialog(dialogs.account),
+  svgIcon,
+  escapeHtml: (value) => escapeHtml(value),
+});
+
 for (const button of document.querySelectorAll("[data-scroll]")) {
   button.addEventListener("click", () => $(button.dataset.scroll)?.scrollIntoView({ behavior: "smooth", block: "start" }));
 }
@@ -1647,9 +1660,9 @@ $("downloadIcs").addEventListener("click", () => {
 
 $("privacyButton").addEventListener("click", () => openDialog(dialogs.privacy));
 
-for (const option of document.querySelectorAll(".privacy-option")) {
+for (const option of document.querySelectorAll("#privacyDialog .privacy-option")) {
   option.addEventListener("click", () => {
-    for (const item of document.querySelectorAll(".privacy-option")) item.classList.remove("active");
+    for (const item of document.querySelectorAll("#privacyDialog .privacy-option")) item.classList.remove("active");
     option.classList.add("active");
     option.querySelector("input").checked = true;
   });
@@ -1903,6 +1916,7 @@ $("signOutButton").addEventListener("click", async () => {
 
 function renderAccount(user) {
   ui.user = user || null;
+  bookingOwner?.reload();
   const signedIn = Boolean(user);
   const name = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email || "Google account";
   $("accountStatus").textContent = signedIn ? "Signed in" : "Not signed in";
