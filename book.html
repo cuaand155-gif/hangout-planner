@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f4eee6" />
+    <meta name="description" content="Pick a time that works — no account needed." />
+    <meta name="robots" content="noindex" />
+    <link rel="icon" href="data:," />
+    <title>Book a time — Waddle</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:ital,opsz,wght@0,9..144,500..700;1,9..144,500..700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script>!function(d,a){try{a=localStorage.getItem("gatherly-appearance")}catch(e){}a=a=="dark"||a!="light"&&matchMedia("(prefers-color-scheme: dark)").matches;d.dataset.theme=a?"dark":"light";document.querySelector("meta[name=theme-color]").content=a?"#16120f":"#f4eee6"}(document.documentElement)</script>
+  </head>
+  <body class="booking-body">
+    <main class="booking-shell">
+      <p class="booking-brand"><span aria-hidden="true">🐧</span> waddle</p>
+
+      <section class="booking-card" id="bookingCard" aria-live="polite">
+        <div class="booking-loading" id="bookingLoading">Loading times…</div>
+
+        <div id="bookingPicker" hidden>
+          <header class="booking-head">
+            <div class="booking-avatar" id="bookingAvatar" aria-hidden="true"></div>
+            <div>
+              <p class="booking-owner" id="bookingOwner"></p>
+              <h1 id="bookingTitle">Book a time</h1>
+              <p class="booking-meta" id="bookingMeta"></p>
+            </div>
+          </header>
+          <p class="booking-privacy">You only see open times. Nothing else on their calendar is shared.</p>
+          <div class="booking-days" id="bookingDays" role="tablist" aria-label="Pick a day"></div>
+          <div class="booking-times" id="bookingTimes" aria-label="Pick a time"></div>
+          <p class="booking-empty" id="bookingEmpty" hidden>No open times in the next couple of weeks. Check back later.</p>
+        </div>
+
+        <form id="bookingForm" class="booking-form" hidden novalidate>
+          <button type="button" class="text-button booking-back" id="bookingBack">← Pick another time</button>
+          <h2 id="bookingChosen"></h2>
+          <label class="field-label" for="guestName">Your name</label>
+          <input class="text-input" id="guestName" name="name" autocomplete="name" maxlength="80" required />
+          <label class="field-label" for="guestEmail">Email</label>
+          <input class="text-input" id="guestEmail" name="email" type="email" autocomplete="email" maxlength="254" required />
+          <label class="field-label" for="guestNote">Anything they should know? <span class="optional">Optional</span></label>
+          <textarea class="text-input" id="guestNote" name="note" rows="3" maxlength="500"></textarea>
+          <input class="booking-trap" name="website" id="guestWebsite" tabindex="-1" autocomplete="off" aria-hidden="true" />
+          <p class="booking-error" id="bookingError" role="alert" hidden></p>
+          <button class="primary-button full" type="submit" id="bookingSubmit">Confirm booking</button>
+        </form>
+
+        <div id="bookingDone" class="booking-done" hidden>
+          <div class="booking-check" aria-hidden="true">✓</div>
+          <h2 id="doneTitle">You're booked.</h2>
+          <p id="doneWhen"></p>
+          <div class="booking-actions">
+            <a class="outline-button" id="doneGoogle" target="_blank" rel="noopener">Add to Google Calendar</a>
+            <button class="outline-button" id="doneIcs" type="button">Apple / Outlook (.ics)</button>
+          </div>
+          <p class="booking-hint" id="doneCancelHint"></p>
+        </div>
+
+        <div id="bookingMessage" class="booking-done" hidden>
+          <h2 id="messageTitle"></h2>
+          <p id="messageBody"></p>
+          <div class="booking-actions" id="messageActions"></div>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/book.js"></script>
+  </body>
+</html>
