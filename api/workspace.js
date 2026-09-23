@@ -7,6 +7,10 @@
 // a demo workspace and reports persisted:false, which is what makes the app
 // usable on static hosting without pretending that edits are being saved.
 //
+// With a database, every group except the demo needs a signed-in caller: no
+// valid Supabase token is a 401 with signIn:true and nothing about the group,
+// not even whether it exists. The demo stays open so people can try the app.
+//
 // `rev` is the row's updated_at. A PUT sends the rev it read and the update
 // only lands if the row still carries it, so two people editing at once get a
 // 409 with the current state instead of silently overwriting each other.
@@ -111,6 +115,13 @@ async function handle(request, response) {
 
   const { url, key } = settings;
 
+  // Groups require an account; checked before anything is read or written.
+  let authenticatedUser;
+  if (slug !== DEMO_SLUG) {
+    authenticatedUser = await userFromToken(url, key, bearer(request));
+    if (!authenticatedUser) return send(response, 401, { error: "Sign in to open this group.", signIn: true });
+  }
+
   if (request.method === "GET") {
     const { row, error } = await loadRow(url, key, slug);
     if (error) return send(response, 502, { error: "Unable to load workspace", detail: error });
@@ -150,11 +161,10 @@ async function handle(request, response) {
   }
 
   const stored = normalizeWorkspaceState(current.row.state);
-  let authenticatedUser;
 
   // A locked workspace only accepts writes from a signed-in member.
   if (stored.settings.locked) {
-    authenticatedUser = await userFromToken(url, key, bearer(request));
+    if (authenticatedUser === undefined) authenticatedUser = await userFromToken(url, key, bearer(request));
     const userId = authenticatedUser;
     const allowed = userId && (stored.ownerId === userId || stored.members.some((member) => member.userId === userId));
     if (!allowed) {

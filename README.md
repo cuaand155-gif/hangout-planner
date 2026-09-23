@@ -125,10 +125,13 @@ browser and never uploaded as they are.
 
 ### Sharing and privacy
 
-- A workspace lives at `/?w=<slug>`. Anyone with the link can open it, add their
-  times and edit — that is what makes the invite link work without accounts.
-- **Settings → Only signed-in members can edit** locks a workspace once you've
-  signed in, after which the API rejects writes that don't carry a member's token.
+- A group lives at `/?w=<slug>`. Opening one needs a Google sign-in: without a
+  valid token the API answers 401 and returns nothing about the group, and the
+  app shows a sign-in screen instead. Anyone signed in with the link can join.
+  The demo group (`weekend-crew`) stays open so people can try the app.
+- **Settings → Only signed-in members can edit** narrows that further: only
+  people already in the group (or its owner) can make changes.
+- Booking links (`/book/<handle>`) never need an account on the booker's side.
 - Calendar links are kept in your browser's local storage and never uploaded.
   Only the resulting busy blocks are shared with the group.
 - Event titles are stripped unless the group turns on **Show event details**,

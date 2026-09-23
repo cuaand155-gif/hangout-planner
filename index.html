@@ -45,6 +45,16 @@
         </div>
       </aside>
 
+      <section class="signin-gate" id="signInGate" hidden aria-labelledby="gateTitle">
+        <div class="signin-card">
+          <p class="booking-brand"><span aria-hidden="true">🐧</span> waddle</p>
+          <p class="eyebrow">YOU'RE INVITED</p>
+          <h1 id="gateTitle">Sign in to join this group</h1>
+          <p>Groups share when people are free, so only signed-in people can open them. It's free and takes one tap with Google.</p>
+          <button class="primary-button full" type="button" id="gateSignIn">Sign in with Google</button>
+          <a class="text-button" href="/">Just looking? Try the demo group</a>
+        </div>
+      </section>
       <main class="main-content">
         <header class="topbar">
           <button class="mobile-menu" id="mobileMenu" aria-label="Open menu" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#i-menu"/></svg></button>
@@ -315,7 +325,7 @@
       </form>
       <div id="friendsPanel" class="people-form" hidden>
         <div id="friendsSignedOut" hidden>
-          <p class="form-hint">Friend requests need an account, so both people can be reached. The invite link above works without one.</p>
+          <p class="form-hint">Friend requests need an account, so both people can be reached. The invite link above works too; they sign in with Google when they open it.</p>
           <button class="google-button" id="friendsSignInButton" type="button"><span class="google-logo">G</span> Continue with Google</button>
         </div>
         <div id="friendsSignedIn" hidden>
@@ -414,7 +424,7 @@
           <div><label class="field-label" for="settingDayStart">Day starts</label><select class="text-input" id="settingDayStart"></select></div>
           <div><label class="field-label" for="settingDayEnd">Day ends</label><select class="text-input" id="settingDayEnd"></select></div>
         </div>
-        <label class="schedule-toggle"><input type="checkbox" id="settingLocked" /><span><strong>Only signed-in members can edit</strong><small>Without this, anyone holding the invite link can change this workspace.</small></span></label>
+        <label class="schedule-toggle"><input type="checkbox" id="settingLocked" /><span><strong>Only signed-in members can edit</strong><small>Without this, anyone signed in with the invite link can join and edit.</small></span></label>
         <p class="form-hint" id="lockHint"></p>
         <button class="primary-button full" type="submit">Save settings</button>
       </form>

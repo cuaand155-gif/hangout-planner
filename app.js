@@ -53,7 +53,7 @@ import {
   showsTitle,
   togglePicked,
 } from "./lib/sharing.js";
-import { checklistSteps, showChecklist } from "./lib/checklist.js";
+import { DEMO_SLUG, checklistSteps, placeholderName, showChecklist } from "./lib/checklist.js";
 import { APPEARANCES, THEME_COLORS, normalizeAppearance, resolveTheme } from "./lib/appearance.js";
 import { initBookingOwner } from "./booking-owner.js";
 import { installMode, isStandalone, registerServiceWorker } from "./lib/pwa.js";
@@ -232,10 +232,30 @@ async function accessToken() {
   return data.session?.access_token || null;
 }
 
+/** Groups need an account; the demo doesn't. Shown instead of the planner. */
+function renderSignInGate() {
+  const gated = session.needsSignIn === true;
+  $("signInGate").hidden = !gated;
+  document.body.classList.toggle("gated", gated);
+  // "book-club-7fq2x" reads as "Book club"; the random ending is only there to keep links unique.
+  if (gated) $("gateTitle").textContent = `Sign in to join ${placeholderName(session.slug.replace(/-(?=[a-z0-9]*\d)[a-z0-9]{5}$/, ""))}`;
+}
+
 async function loadWorkspace() {
   const cached = readJson(STORAGE.cache(session.slug), null);
   try {
-    const response = await fetch(`/api/workspace?slug=${encodeURIComponent(session.slug)}`, { headers: { Accept: "application/json" } });
+    const token = await accessToken();
+    const response = await fetch(`/api/workspace?slug=${encodeURIComponent(session.slug)}`, {
+      headers: { Accept: "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    });
+    const gated = response.status === 401;
+    session.needsSignIn = gated;
+    renderSignInGate();
+    if (gated) {
+      // Nothing about the group comes back, and nothing is saved until sign-in.
+      ui.workspaceLoaded = true;
+      return;
+    }
     if (!response.ok) throw new Error(String(response.status));
     const payload = await response.json();
     session.rev = payload.rev || null;
@@ -286,6 +306,8 @@ function nextStateFrom(base, apply, note) {
 }
 
 async function applyAndSave(apply, { note } = {}) {
+  // Behind the sign-in gate nothing is saved (background syncs included).
+  if (session.needsSignIn) return false;
   let before = session.state;
   const next = nextStateFrom(before, apply, note);
   if (!next) {
@@ -360,6 +382,12 @@ async function applyAndSave(apply, { note } = {}) {
       writeJson(STORAGE.cache(session.slug), session.state);
       render();
       showToast(TOO_LARGE_MESSAGE);
+      return false;
+    }
+    if (response.status === 401 && payload.signIn) {
+      // Signed out elsewhere mid-edit: put the gate back up.
+      session.needsSignIn = true;
+      renderSignInGate();
       return false;
     }
     if (response.status === 403) {
@@ -2047,6 +2075,8 @@ $("googleSignInButton").addEventListener("click", async () => {
   }
 });
 
+$("gateSignIn").addEventListener("click", () => $("googleSignInButton").click());
+
 $("signOutButton").addEventListener("click", async () => {
   if (!supabaseClient) return;
   await supabaseClient.auth.signOut();
@@ -3196,11 +3226,14 @@ async function start() {
       friends.loaded = false;
       if (authSession?.user) {
         await loadRemoteProfile(authSession.user);
-        await ensureMembership();
+        // Coming through the sign-in gate: load the group now (that joins it too).
+        if (session.needsSignIn) await loadWorkspace();
+        else await ensureMembership();
         await loadFriends({ force: true });
         loadRemoteGroups();
       } else {
         renderFriends();
+        if (session.slug !== DEMO_SLUG) await loadWorkspace();
       }
     });
     if (data.session?.user) await loadRemoteProfile(data.session.user);

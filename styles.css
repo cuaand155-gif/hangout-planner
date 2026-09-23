@@ -436,3 +436,13 @@ dialog.wide-dialog{width:min(560px,calc(100% - 32px))}
 .install-card small .icon{width:13px;height:13px;vertical-align:-2px}
 .install-card .outline-button{flex:none}
 .install-card small strong{color:var(--ink);font-weight:600}
+/* ---------- Sign-in gate for groups ---------- */
+.signin-gate{position:fixed;inset:0;z-index:40;display:grid;place-items:center;padding:24px 16px;background:var(--bg);overflow:auto}
+.signin-card{width:100%;max-width:420px;background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);padding:32px 28px;text-align:center}
+.signin-card h1{font:600 28px/1.15 "Fraunces",Georgia,serif;color:var(--ink);margin:6px 0 10px;letter-spacing:-.01em}
+.signin-card p{color:var(--muted);font-size:13px;line-height:1.55;margin:0}
+.signin-card .booking-brand{margin:0 0 22px}
+.signin-card .eyebrow{margin:0}
+.signin-card .text-button{display:inline-block;margin-top:14px;font-size:12px}
+body.gated .app-shell>:not(.signin-gate){visibility:hidden}
+.signin-card .booking-brand{justify-content:center}
