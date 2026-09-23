@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm test)",
+      "Bash(npm test *)",
+      "mcp__Supabase__list_projects",
+      "mcp__Supabase__list_tables",
+      "mcp__Supabase__get_advisors"
+    ]
+  }
+}
