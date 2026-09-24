@@ -61,7 +61,7 @@ Each line prints `ok  <command>` or `ERR <command>` followed by the reason. Scre
 - `--signed-in` replaces supabase-js with `fake-supabase.js` (see below).
 
 **`--signed-in` in detail.** The fake is an in-memory database with you ("Alexi"), an accepted friend "Sam Rivera" who has "free now" turned on, and shares from Sam.
-- It seeds two of your own events today (Therapy 9–10, Soccer 18–20), so My calendar, Who sees what, the booking dialog, Friends and the Free now strip all work.
+- It seeds two of your own events today (Therapy 9–10, Soccer 18–20), so My calendar, the named event blocks on the week grid, Who sees what, the booking dialog (save returns the row), Friends and the Free now strip all work.
 - Edit `fake-supabase.js` to add tables or RPC answers.
 
 Useful selectors:
@@ -91,6 +91,8 @@ Tests cover the API handlers with a fake PostgREST, the pure logic in `lib/` (bo
 - **Service worker.** On localhost `sw.js` registers unless the URL has `?nosw`. Within one driver run it can serve a cached `app.js`, so use `/?nosw` while you're changing code.
 - **`open <dialog>` skips the app's fill step.** For example, Settings shows an empty group name and "Shortest window". To see a dialog as users do, click its real button (`#settingsButton`, `#bookingButton`, `#sharingButton` …).
 - **With `--phone` the sidebar is off-screen.** `click #calendarButton` times out until you `click #mobileMenu` first.
+- **Theme switches animate** (view transition), so `wait 600` before reading `document.documentElement.dataset.theme`.
+- **Event blocks on the week grid (`.event-chip`) are positioned from the laid-out cells**, and are re-drawn when the grid resizes. They're `pointer-events:none`, so painting busy hours still works underneath.
 - **RSVP and calendar-add controls stay hidden until a time is picked:** click a `.time-option [data-window]` first.
 - **The sign-in gate for groups only happens with a database.** In demo mode `/?w=anything` opens normally. To see the gate, stub `/api/workspace` to return `401 {"signIn":true}` (Playwright `page.route`).
 - **External requests fail in this sandbox.** The driver aborts Google Fonts (so the fallback serif and sans fonts render) and hides `ERR_FAILED` / `ERR_TUNNEL_CONNECTION_FAILED` noise. Without `--signed-in`, the Supabase CDN script fails too, so auth buttons toast "Google sign-in needs provider credentials first."

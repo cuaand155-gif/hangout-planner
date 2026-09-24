@@ -283,6 +283,7 @@
       <div class="dialog-header"><div><p class="eyebrow">TENTATIVE PLAN</p><h2>What might be fun?</h2></div><button class="close-dialog" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
       <p class="dialog-copy">Save an idea without locking anyone into a date. We’ll use the timing you choose to find overlaps.</p>
       <form id="tentativePlanForm">
+        <p class="plan-when" id="planWhen" hidden></p>
         <label class="field-label" for="planActivity">Plan idea</label>
         <input class="text-input" id="planActivity" name="activity" placeholder="Dinner at Luma" required maxlength="80" />
         <label class="field-label" for="planLocation">Where</label>
@@ -492,7 +493,7 @@
 
       <form id="bookingSettingsForm" hidden>
         <div class="setting-grid">
-          <div><label class="field-label" for="bookingHandle">Link name</label><input class="text-input" id="bookingHandle" required pattern="[a-z0-9][a-z0-9-]{2,47}" maxlength="48" autocomplete="off" /></div>
+          <div><label class="field-label" for="bookingHandle">Link name</label><input class="text-input" id="bookingHandle" required pattern="[a-z0-9][a-z0-9\-]{2,47}" maxlength="48" autocomplete="off" /></div>
           <div><label class="field-label" for="bookingOwnerName">Your name, as guests see it</label><input class="text-input" id="bookingOwnerName" maxlength="60" /></div>
         </div>
         <label class="field-label" for="bookingPageTitle">What are they booking?</label>

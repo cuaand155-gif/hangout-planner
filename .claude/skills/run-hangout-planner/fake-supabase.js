@@ -40,6 +40,18 @@
     };
     function run() {
       if (op === "select") return Promise.resolve({ data: apply(), error: null });
+      if (op === "insert" || op === "update") {
+        // Like PostgREST with .select(): hand back the written rows.
+        let written;
+        if (op === "insert") {
+          written = (Array.isArray(payload) ? payload : [payload]).map((row) => ({ id: crypto.randomUUID(), feed_token: "f".repeat(32), created_at: new Date().toISOString(), ...row }));
+          db[table] = rows().concat(written);
+        } else {
+          written = apply().map((row) => Object.assign(row, payload));
+        }
+        calls.push([table, op, payload]);
+        return Promise.resolve({ data: written, error: null });
+      }
       if (op === "upsert") {
         const key = table === "presence" || table === "sharing_settings" ? "user_id" : "id";
         db[table] = rows().filter((row) => row[key] !== payload[key]).concat([payload]);

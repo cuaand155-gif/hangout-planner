@@ -666,10 +666,69 @@ phoneQuery.addEventListener("change", () => renderGrid());
   $("groupViewTab").setAttribute("aria-selected", String(!isMineView));
   $("mineViewTab").setAttribute("aria-selected", String(isMineView));
 
+  renderEventLayer(days, slots, isMineView);
   renderDayStrip(week);
   renderBestTimes(week);
   renderSelectedWindow(week);
 }
+
+/**
+ * Your own events, drawn by name on top of the week (only you see these).
+ * In "My availability" they're solid; on the group view they're outlines,
+ * so the free/busy colours underneath still read.
+ */
+function renderEventLayer(days, slots, isMineView) {
+  const grid = $("calendarGrid");
+  const events = allMyEvents().filter((event) => !event.allDay);
+  if (!events.length || !slots.length) return;
+  const first = slots[0].hour;
+  const last = slots[slots.length - 1].hour + 1;
+  const chips = [];
+  for (const day of days) {
+    const top = grid.querySelector(`.slot[data-iso="${day.iso}"][data-hour="${first}"]`);
+    const bottom = grid.querySelector(`.slot[data-iso="${day.iso}"][data-hour="${last - 1}"]`);
+    if (!top || !bottom) continue;
+    const hourPx = (bottom.offsetTop + bottom.offsetHeight - top.offsetTop) / (last - first);
+    const from = new Date(day.date);
+    from.setHours(first, 0, 0, 0);
+    const to = new Date(day.date);
+    to.setHours(last, 0, 0, 0);
+    const today = eventsOnDay(events, day.date)
+      .map((event) => ({ event, start: Math.max(+new Date(event.start), +from), end: Math.min(+new Date(event.end), +to) }))
+      .filter((entry) => entry.end > entry.start)
+      .sort((a, b) => a.start - b.start || b.end - a.end);
+    // Side-by-side lanes for events that overlap.
+    const lanes = [];
+    for (const entry of today) {
+      entry.lane = lanes.findIndex((end) => end <= entry.start);
+      if (entry.lane === -1) entry.lane = lanes.push(0) - 1;
+      lanes[entry.lane] = entry.end;
+    }
+    for (const entry of today) {
+      const overlapping = today.filter((other) => other.start < entry.end && other.end > entry.start);
+      const laneCount = Math.max(...overlapping.map((other) => other.lane)) + 1;
+      const width = (top.offsetWidth - 6) / laneCount;
+      const hidden = isHidden(hiddenKeys, entry.event.title);
+      const title = entry.event.title || "Busy";
+      const time = `${formatClock(new Date(entry.event.start))} – ${formatClock(new Date(entry.event.end))}`;
+      chips.push(
+        `<div class="event-chip${isMineView ? "" : " ghost"}${hidden ? " private" : ""}" aria-hidden="true" title="${escapeAttribute(`${title} · ${time}${hidden ? " · private" : ""}`)}"` +
+          ` style="top:${top.offsetTop + ((entry.start - from) / 3600000) * hourPx + 1}px;height:${Math.max(18, ((entry.end - entry.start) / 3600000) * hourPx - 2)}px;` +
+          `left:${top.offsetLeft + 3 + entry.lane * width}px;width:${width - 2}px">` +
+          `${hidden ? svgIcon("lock") : ""}<strong>${escapeHtml(title)}</strong><small>${escapeHtml(time)}</small></div>`
+      );
+    }
+  }
+  grid.insertAdjacentHTML("beforeend", chips.join(""));
+}
+
+// Chip positions come from the laid-out cells, so redraw when the grid resizes.
+let gridWidth = 0;
+new ResizeObserver(([entry]) => {
+  if (Math.round(entry.contentRect.width) === gridWidth) return;
+  gridWidth = Math.round(entry.contentRect.width);
+  renderGrid();
+}).observe($("calendarGrid"));
 
 function renderDayStrip(week) {
   const strip = $("dayStrip");
@@ -1808,15 +1867,19 @@ $("inviteButton").addEventListener("click", () => {
   $("inviteLink").value = inviteUrl();
   renderSavedPeople();
   openDialog(dialogs.people);
-  shareInvite("Anyone with this link can add their times.");
+  shareInvite("Anyone who signs in with this link can join and add their times.");
 });
 
 $("shareButton").addEventListener("click", () => shareInvite("Availability view shared."));
 $("copyInviteLink").addEventListener("click", () => shareInvite("Invite link ready."));
 
+// "Plan something" under the selected window: the plan form opens with that time already picked.
 $("planButton").addEventListener("click", () => {
-  $("ideas").scrollIntoView({ behavior: "smooth", block: "start" });
-  showToast("Good window — now pick something to do.");
+  const window = chosenWindow(currentWeek());
+  if (!window) return;
+  const length = settings().minWindowHours * 3600 * 1000;
+  ui.pendingWindow = { start: window.start, end: new Date(Math.min(window.start.getTime() + length, window.end.getTime())) };
+  openPlanDialog();
 });
 
 $("addToGoogle").addEventListener("click", () => {
@@ -2142,13 +2205,23 @@ function openPlanDialog() {
   $("planStart").value = plan?.start || "";
   $("planEnd").value = plan?.end || "";
   $("dateRangeFields").hidden = plan?.timing !== "range";
+  $("planWhen").hidden = !ui.pendingWindow;
+  $("planWhen").textContent = ui.pendingWindow
+    ? `${formatDayStamp(ui.pendingWindow.start)}, ${formatClock(ui.pendingWindow.start)} – ${formatClock(ui.pendingWindow.end)}`
+    : "";
   $("planRepeat").innerHTML = REPEATS.map((entry) => `<option value="${entry.key}"${(plan?.repeat || "none") === entry.key ? " selected" : ""}>${entry.label}</option>`).join("");
   openDialog(dialogs.plan);
 }
 
 for (const button of [$("tentativePlanButton"), $("editTentativePlan")]) {
-  button.addEventListener("click", openPlanDialog);
+  button.addEventListener("click", () => {
+    ui.pendingWindow = null;
+    openPlanDialog();
+  });
 }
+$("tentativePlanDialog").addEventListener("close", () => {
+  ui.pendingWindow = null;
+});
 
 for (const input of document.querySelectorAll('input[name="timing"]')) {
   input.addEventListener("change", () => {
@@ -2180,6 +2253,13 @@ $("tentativePlanForm").addEventListener("submit", async (event) => {
     for (const key of ["chosen", "chosenEnd", "timeZone", "timeVotes", "rsvp"]) {
       if (previous[key] !== undefined) plan[key] = previous[key];
     }
+  }
+  // Opened from "Plan something": that window becomes the plan's time.
+  if (ui.pendingWindow) {
+    plan.chosen = ui.pendingWindow.start.toISOString();
+    plan.chosenEnd = ui.pendingWindow.end.toISOString();
+    plan.timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    ui.pendingWindow = null;
   }
   if (plan.timing === "range" && plan.start && plan.end && plan.end < plan.start) {
     showToast("The end of the range comes before the start.");
