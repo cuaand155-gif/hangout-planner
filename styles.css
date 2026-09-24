@@ -497,3 +497,19 @@ body.gated .app-shell>:not(.signin-gate){visibility:hidden}
 .free-chip small{display:block;font-size:10px;color:var(--muted)}
 .status-copy small{letter-spacing:0;font-weight:400;text-transform:none}
 .agenda-row.is-private .agenda-private{background:var(--line);color:var(--ink)}
+/* ---------- Usability fixes (layout, focus, radios) ---------- */
+/* The "connect a calendar" note spans the whole week, not one day column. */
+.agenda>.agenda-blank{grid-column:1/-1}
+/* The lock sits inside the event card, so narrow day columns keep their width. */
+.agenda-row{position:relative;display:block}
+.agenda-row .agenda-event{padding-right:30px}
+.agenda-private{position:absolute;top:4px;right:4px;width:26px;height:26px}
+.agenda-event .agenda-time{display:block;font-size:10px}
+/* A round, visible close target with a ring that follows its shape. */
+.close-dialog{width:36px;height:36px;border-radius:50%;flex:none;transition:background-color .2s var(--ease)}
+.close-dialog:hover{background:var(--bg)}
+.close-dialog:focus-visible{outline:2px solid var(--purple);outline-offset:2px}
+/* Custom radios keep their circle inside flex rows. */
+.radio{flex:none}
+/* A friend's status can wrap instead of being cut off. */
+.friend-row small.friend-status{white-space:normal;overflow:visible}
