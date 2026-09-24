@@ -6,7 +6,7 @@
 // through to the network.
 
 // Bump the version whenever SHELL changes; activate deletes the old cache.
-const CACHE = "waddle-v1";
+const CACHE = "waddle-v2";
 
 // The app shell: the page, every module app.js imports (directly or not), styles and icons.
 const SHELL = [
@@ -25,6 +25,7 @@ const SHELL = [
   "/lib/membership.js",
   "/lib/palettes.js",
   "/lib/planner.js",
+  "/lib/presence.js",
   "/lib/pwa.js",
   "/lib/sharing.js",
   "/lib/sync.js",

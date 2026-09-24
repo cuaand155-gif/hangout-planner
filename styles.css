@@ -446,3 +446,54 @@ dialog.wide-dialog{width:min(560px,calc(100% - 32px))}
 .signin-card .text-button{display:inline-block;margin-top:14px;font-size:12px}
 body.gated .app-shell>:not(.signin-gate){visibility:hidden}
 .signin-card .booking-brand{justify-content:center}
+/* ---------- Sharing v2: private events, for-a-while shares, free now ---------- */
+:root{--free:#3f9a6b;--free-soft:color-mix(in srgb,var(--free) 12%,var(--surface))}
+:root[data-theme="dark"]{--free:#62c190}
+.agenda-row{display:flex;align-items:stretch;gap:4px}
+.agenda-row .agenda-event{flex:1;min-width:0}
+.agenda-private{flex:none;width:30px;border:0;border-radius:8px;background:transparent;color:var(--faint);display:grid;place-items:center;transition:background-color .2s var(--ease),color .2s var(--ease)}
+.agenda-private .icon{width:14px;height:14px}
+.agenda-private:hover{background:var(--bg);color:var(--ink)}
+.agenda-row.is-private .agenda-event{background:var(--bg);color:var(--muted);border-style:dashed;border-color:var(--line)}
+.agenda-row.is-private .agenda-event strong{text-decoration:line-through;text-decoration-color:var(--faint)}
+.agenda-row.is-private .agenda-private{background:var(--ink);color:var(--surface)}
+.share-picked-chip.is-private{display:inline-flex;align-items:center;gap:5px;border-color:var(--line);background:var(--bg);color:var(--ink)}
+.share-picked-chip .icon{width:12px;height:12px}
+.share-friend{display:grid;gap:4px;padding:6px 0;border-bottom:1px solid var(--line)}
+.share-friend:last-child{border-bottom:0}
+.share-grant summary{cursor:pointer;font-size:11px;font-weight:600;color:var(--purple);list-style:none;padding:2px 0}
+.share-grant summary::-webkit-details-marker{display:none}
+.share-grant summary:before{content:"+ "}
+.share-grant details[open] summary:before{content:"− "}
+.grant-form{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.grant-form .text-input{width:auto;flex:1 1 140px;padding:8px 30px 8px 10px;font-size:11px}
+.grant-form .outline-button{flex:none;padding:8px 14px}
+.grant-on{display:flex;align-items:center;gap:6px;margin:2px 0 0;font-size:11px;color:var(--ink);background:var(--lavender);border-radius:10px;padding:7px 10px}
+.grant-on .icon{width:13px;height:13px;color:var(--purple);flex:none}
+.grant-on span{flex:1}
+.grant-on .text-button{font-size:11px;padding:0}
+.status-dot{width:9px;height:9px;border-radius:50%;background:var(--faint);flex:none}
+.status-card{display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px;margin:4px 0 16px;padding:14px;border-radius:14px;background:var(--bg)}
+.status-card.on{background:var(--free-soft)}
+.status-card.on .status-dot,.free-now .status-dot{background:var(--free);box-shadow:0 0 0 4px color-mix(in srgb,var(--free) 22%,transparent)}
+.status-copy{flex:1 1 180px;min-width:0}
+.status-copy strong{display:block;font-size:13px;color:var(--ink)}
+.status-copy small{display:block;font-size:11px;color:var(--muted);margin-top:2px}
+.status-actions{display:flex;flex-wrap:wrap;gap:6px;flex:1 1 100%}
+.status-card.on .status-actions{flex:none}
+.status-actions .text-input{width:auto;flex:1 1 130px;padding:9px 11px;font-size:12px}
+.status-actions select.text-input{padding-right:30px}
+.status-actions .primary-button,.status-actions .outline-button{flex:none;padding:9px 14px}
+.friend-status{display:block;font-size:11px;font-weight:600;margin-top:2px;color:var(--muted)}
+.friend-status.free-now{color:var(--free)}
+.avatar.is-free{box-shadow:0 0 0 2px var(--surface),0 0 0 4px var(--free)}
+.free-now{display:flex;align-items:center;gap:8px;overflow-x:auto;margin:0 0 28px;padding:4px 2px 8px;scrollbar-width:none}
+.free-now::-webkit-scrollbar{display:none}
+.free-now-label{display:inline-flex;align-items:center;gap:8px;flex:none;font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--free);margin-right:4px}
+.free-chip{display:inline-flex;align-items:center;gap:9px;flex:none;border:0;border-radius:999px;background:var(--surface);box-shadow:var(--shadow);padding:6px 14px 6px 6px;text-align:left;color:var(--ink);transition:transform .25s var(--ease),box-shadow .25s var(--ease)}
+.free-chip:hover{transform:translateY(-1px);box-shadow:var(--shadow-lift)}
+.free-chip .avatar{width:30px;height:30px;font-size:11px;box-shadow:0 0 0 2px var(--surface),0 0 0 3px var(--free)}
+.free-chip strong{display:block;font-size:12px}
+.free-chip small{display:block;font-size:10px;color:var(--muted)}
+.status-copy small{letter-spacing:0;font-weight:400;text-transform:none}
+.agenda-row.is-private .agenda-private{background:var(--line);color:var(--ink)}

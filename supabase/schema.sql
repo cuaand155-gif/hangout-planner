@@ -265,6 +265,138 @@ create trigger friend_requests_drop_shares
   for each row execute function public.drop_shares_for_ended_friendship();
 
 -- ---------------------------------------------------------------------------
+-- Time-limited shares
+-- ---------------------------------------------------------------------------
+-- "Show Sam everything this weekend": `events` is what they see until
+-- `expires_at`, `fallback_events` what they see afterwards (null: nothing).
+-- Viewers can't read either column directly — only through
+-- shared_calendars(), which picks by the database clock — so a share ends on
+-- time even if the owner's phone never comes back online.
+
+alter table public.calendar_shares
+  add column if not exists fallback_events jsonb
+    check (fallback_events is null or (jsonb_typeof(fallback_events) = 'array' and pg_column_size(fallback_events) < 200000)),
+  add column if not exists expires_at timestamptz;
+
+revoke select on public.calendar_shares from anon, authenticated;
+grant select (owner_id, viewer_id, updated_at, expires_at) on public.calendar_shares to authenticated;
+
+-- Writes go through here: without read access to `events`, a plain upsert is
+-- refused, and this is also the one place that checks the friendship.
+create or replace function public.publish_share(p_viewer uuid, p_events jsonb, p_fallback jsonb default null, p_expires timestamptz default null)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare me uuid := auth.uid();
+begin
+  if me is null then raise exception 'sign in first' using errcode = '42501'; end if;
+  if p_viewer = me then raise exception 'cannot share with yourself' using errcode = '22023'; end if;
+  if not exists (
+    select 1 from public.friend_requests fr
+    where fr.status = 'accepted'
+      and ((fr.requester_id = me and fr.recipient_id = p_viewer) or (fr.requester_id = p_viewer and fr.recipient_id = me))
+  ) then raise exception 'only friends can be shared with' using errcode = '42501'; end if;
+  if p_expires is not null and p_expires > now() + interval '31 days' then
+    raise exception 'a temporary share lasts at most a month' using errcode = '22023';
+  end if;
+  insert into public.calendar_shares (owner_id, viewer_id, events, fallback_events, expires_at, updated_at)
+  values (me, p_viewer, coalesce(p_events, '[]'::jsonb), case when p_expires is null then null else p_fallback end, p_expires, now())
+  on conflict (owner_id, viewer_id) do update
+    set events = excluded.events, fallback_events = excluded.fallback_events, expires_at = excluded.expires_at, updated_at = excluded.updated_at;
+end;
+$$;
+
+revoke execute on function public.publish_share(uuid, jsonb, jsonb, timestamptz) from public, anon;
+grant execute on function public.publish_share(uuid, jsonb, jsonb, timestamptz) to authenticated;
+
+-- What each friend currently shows you (all of them, or one with p_owner).
+create or replace function public.shared_calendars(p_owner uuid default null)
+returns table (owner_id uuid, events jsonb, updated_at timestamptz, shared_until timestamptz)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select s.owner_id,
+         case when s.expires_at is null or s.expires_at > now() then s.events else s.fallback_events end,
+         s.updated_at,
+         case when s.expires_at > now() then s.expires_at end
+  from public.calendar_shares s
+  where s.viewer_id = auth.uid()
+    and (p_owner is null or s.owner_id = p_owner)
+    and (s.expires_at is null or s.expires_at > now() or s.fallback_events is not null);
+$$;
+
+revoke execute on function public.shared_calendars(uuid) from public, anon;
+grant execute on function public.shared_calendars(uuid) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Sharing choices that follow you between devices
+-- ---------------------------------------------------------------------------
+-- Default levels, per-friend levels, picked event names, time-limited shares
+-- and private events, in one row only you can read or write. Private events
+-- are stored as salted SHA-256 hashes of their names, never the names.
+
+create table if not exists public.sharing_settings (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  settings jsonb not null check (jsonb_typeof(settings) = 'object' and pg_column_size(settings) < 50000),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.sharing_settings enable row level security;
+
+drop policy if exists "Users read their own sharing settings" on public.sharing_settings;
+create policy "Users read their own sharing settings"
+  on public.sharing_settings for select to authenticated using (auth.uid() = user_id);
+
+drop policy if exists "Users create their own sharing settings" on public.sharing_settings;
+create policy "Users create their own sharing settings"
+  on public.sharing_settings for insert to authenticated with check (auth.uid() = user_id);
+
+drop policy if exists "Users update their own sharing settings" on public.sharing_settings;
+create policy "Users update their own sharing settings"
+  on public.sharing_settings for update to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "Users delete their own sharing settings" on public.sharing_settings;
+create policy "Users delete their own sharing settings"
+  on public.sharing_settings for delete to authenticated using (auth.uid() = user_id);
+
+-- ---------------------------------------------------------------------------
+-- "Free now"
+-- ---------------------------------------------------------------------------
+-- A status you switch on for up to a day. Only accepted friends can see it.
+
+create table if not exists public.presence (
+  user_id uuid primary key default auth.uid() references auth.users(id) on delete cascade,
+  until timestamptz not null,
+  note text not null default '' check (char_length(note) <= 80),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.presence enable row level security;
+revoke all on public.presence from anon;
+
+drop policy if exists "People manage their own status" on public.presence;
+create policy "People manage their own status"
+  on public.presence for all to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id and until <= now() + interval '1 day');
+
+drop policy if exists "Friends see each other's status" on public.presence;
+create policy "Friends see each other's status"
+  on public.presence for select to authenticated
+  using (
+    exists (
+      select 1 from public.friend_requests fr
+      where fr.status = 'accepted'
+        and ((fr.requester_id = auth.uid() and fr.recipient_id = user_id)
+          or (fr.requester_id = user_id and fr.recipient_id = auth.uid()))
+    )
+  );
+
+-- ---------------------------------------------------------------------------
 -- Notes on tables this schema no longer creates
 -- ---------------------------------------------------------------------------
 -- Earlier prototypes had friendships, friend_invites and calendar_connections.

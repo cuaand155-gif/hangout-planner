@@ -109,6 +109,8 @@
             </div>
           </section>
 
+          <section class="free-now" id="freeNowStrip" hidden aria-label="Friends who are free now"></section>
+
           <section class="tentative-section" id="tentativePlanSection" hidden>
             <div class="section-heading compact">
               <div><p class="eyebrow">JUST A THOUGHT</p><h2>Keep a maybe on the calendar</h2><p>Save the idea now and find the best time with your group later.</p></div>
@@ -329,6 +331,11 @@
           <button class="google-button" id="friendsSignInButton" type="button"><span class="google-logo">G</span> Continue with Google</button>
         </div>
         <div id="friendsSignedIn" hidden>
+          <div class="status-card" id="statusCard">
+            <span class="status-dot" aria-hidden="true"></span>
+            <div class="status-copy"><strong id="statusTitle">Free right now?</strong><small id="statusDetail">Let your friends know at a glance.</small></div>
+            <div class="status-actions" id="statusActions"></div>
+          </div>
           <form id="friendRequestForm">
             <label class="field-label" for="friendRequestEmail">Send a friend request</label>
             <div class="copy-row">
@@ -444,11 +451,16 @@
       <p class="field-label">Change it for one friend</p>
       <p class="form-hint" id="shareSignedOut" hidden>Sign in to share with friends. Friends need an account so only they can see it.</p>
       <div class="share-friend-list" id="shareFriendList"></div>
+      <p class="form-hint">“For a while” shares more with one friend, then goes back by itself — even if your phone is off.</p>
       <label class="field-label" for="shareGroups">Groups see</label>
       <select class="text-input" id="shareGroups"></select>
       <p class="form-hint" id="shareGroupsHint"></p>
       <p class="field-label">Events you picked</p>
       <div class="share-picked-list" id="sharePickedList"></div>
+      <p class="field-label">Private events</p>
+      <div class="share-picked-list" id="sharePrivateList"></div>
+      <p class="form-hint">Private events are hidden from everyone — not even shown as busy — so a group may suggest a time over one. Booking links still keep those times closed. Only a scrambled code of each name is saved, never the name.</p>
+      <p class="form-hint" id="shareSyncNote"></p>
       <button class="primary-button full" id="saveSharing" type="button">Save</button>
     </dialog>
 
