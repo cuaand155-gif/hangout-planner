@@ -104,7 +104,7 @@ test("guest and owner calendar files share one UID per booking", () => {
   assert.ok(guest.endsWith("\r\n"));
   const feed = buildOwnerFeed([booking, { ...booking, id: "b2", status: "cancelled" }], { pageTitle: "Chat" });
   assert.match(feed, /UID:booking-b1@gatherly/);
-  assert.match(feed, /SUMMARY:Chat: Sam\; Lee/);
+  assert.match(feed, /SUMMARY:Chat: Sam\\; Lee/);
   assert.match(feed, /UID:booking-b2@gatherly[\s\S]*STATUS:CANCELLED/);
 });
 

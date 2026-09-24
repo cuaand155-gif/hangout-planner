@@ -52,10 +52,26 @@ import {
   normalizeSharing,
   showsTitle,
   togglePicked,
+  GRANT_LENGTHS,
+  activeGrant,
+  baseLevelForFriend,
+  clearGrant,
+  createSharingSettingsStore,
+  friendStatus,
+  grantEnd,
+  isHidden,
+  mergeSharing,
+  resolveHidden,
+  setGrant,
+  toggleHidden,
+  withoutHidden,
 } from "./lib/sharing.js";
-import { checklistSteps, showChecklist } from "./lib/checklist.js";
+import { FREE_LENGTHS, createPresenceStore, freeUntil } from "./lib/presence.js";
+import { DEMO_SLUG, checklistSteps, placeholderName, showChecklist } from "./lib/checklist.js";
 import { APPEARANCES, THEME_COLORS, normalizeAppearance, resolveTheme } from "./lib/appearance.js";
 import { initBookingOwner } from "./booking-owner.js";
+import { installMode, isStandalone, registerServiceWorker } from "./lib/pwa.js";
+import { REPEATS, applyRsvp, nextOccurrence, repeatLabel, rsvpAnswers, rsvpSummary, toggleTimeVote } from "./lib/hangout.js";
 
 // Browser-safe credentials: the publishable (anon) key is designed to ship in
 // client code. Row level security in supabase/schema.sql is what protects data.
@@ -162,6 +178,12 @@ let sharing = normalizeSharing(readJson(STORAGE.sharing, null));
 const friendStore = supabaseClient ? createFriendStore(supabaseClient) : null;
 const friends = { rows: [], profiles: {}, loaded: false, busy: false };
 const shareStore = supabaseClient ? createShareStore(supabaseClient) : null;
+const sharingSettingsStore = supabaseClient ? createSharingSettingsStore(supabaseClient) : null;
+const presenceStore = supabaseClient ? createPresenceStore(supabaseClient) : null;
+// Title keys of your private events, found by hashing (see lib/sharing.js).
+let hiddenKeys = new Set();
+// Friends at a glance: their "free now" and what their shared calendar says.
+const glance = { presence: new Map(), shares: new Map() };
 
 let demoNoticeShown = false;
 const noteDemoMode = () => {
@@ -230,10 +252,30 @@ async function accessToken() {
   return data.session?.access_token || null;
 }
 
+/** Groups need an account; the demo doesn't. Shown instead of the planner. */
+function renderSignInGate() {
+  const gated = session.needsSignIn === true;
+  $("signInGate").hidden = !gated;
+  document.body.classList.toggle("gated", gated);
+  // "book-club-7fq2x" reads as "Book club"; the random ending is only there to keep links unique.
+  if (gated) $("gateTitle").textContent = `Sign in to join ${placeholderName(session.slug.replace(/-(?=[a-z0-9]*\d)[a-z0-9]{5}$/, ""))}`;
+}
+
 async function loadWorkspace() {
   const cached = readJson(STORAGE.cache(session.slug), null);
   try {
-    const response = await fetch(`/api/workspace?slug=${encodeURIComponent(session.slug)}`, { headers: { Accept: "application/json" } });
+    const token = await accessToken();
+    const response = await fetch(`/api/workspace?slug=${encodeURIComponent(session.slug)}`, {
+      headers: { Accept: "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    });
+    const gated = response.status === 401;
+    session.needsSignIn = gated;
+    renderSignInGate();
+    if (gated) {
+      // Nothing about the group comes back, and nothing is saved until sign-in.
+      ui.workspaceLoaded = true;
+      return;
+    }
     if (!response.ok) throw new Error(String(response.status));
     const payload = await response.json();
     session.rev = payload.rev || null;
@@ -284,6 +326,8 @@ function nextStateFrom(base, apply, note) {
 }
 
 async function applyAndSave(apply, { note } = {}) {
+  // Behind the sign-in gate nothing is saved (background syncs included).
+  if (session.needsSignIn) return false;
   let before = session.state;
   const next = nextStateFrom(before, apply, note);
   if (!next) {
@@ -358,6 +402,12 @@ async function applyAndSave(apply, { note } = {}) {
       writeJson(STORAGE.cache(session.slug), session.state);
       render();
       showToast(TOO_LARGE_MESSAGE);
+      return false;
+    }
+    if (response.status === 401 && payload.signIn) {
+      // Signed out elsewhere mid-edit: put the gate back up.
+      session.needsSignIn = true;
+      renderSignInGate();
       return false;
     }
     if (response.status === 403) {
@@ -770,6 +820,7 @@ function renderIdeas() {
           <h3>${escapeHtml(idea.title)}</h3>
           <p>${escapeHtml(idea.description)}</p>
           <div class="idea-meta"><span>⌖ ${escapeHtml(idea.location || "Anywhere")}</span><span>${svgIcon("heart")} ${count} vote${count === 1 ? "" : "s"}</span></div>
+          <button class="text-button plan-idea" type="button" data-plan-idea="${escapeAttribute(idea.id)}">Plan this ${svgIcon("arrow")}</button>
         </div>
       </article>`;
     })
@@ -787,19 +838,65 @@ function renderPlan() {
   $("tentativeTitle").textContent = plan.location ? `${plan.activity} · ${plan.location}` : plan.activity;
 
   const scope = planScopeLabel(plan);
-  $("tentativeTiming").textContent = plan.chosen
-    ? `Pencilled in for ${formatDayStamp(plan.chosen)} at ${formatClock(plan.chosen)} with ${plan.audience}`
-    : `${scope} with ${plan.audience}`;
-  $("tentativeBadge").textContent = plan.chosen ? "Pencilled in" : "Not confirmed";
+  const occurrence = nextOccurrence(plan);
+  const repeats = plan.repeat && plan.repeat !== "none" ? ` · ${repeatLabel(plan.repeat).toLowerCase()}` : "";
+  $("tentativeTiming").textContent = occurrence
+    ? `${repeats ? "Next up" : "Pencilled in for"} ${formatDayStamp(occurrence.start)} at ${formatClock(occurrence.start)} with ${plan.audience}${repeats}`
+    : `${scope} with ${plan.audience}${repeats}`;
+  $("tentativeBadge").textContent = plan.chosen ? (repeats ? "Repeating" : "Pencilled in") : "Not confirmed";
 
-  const suggestions = suggestionsForPlan(plan);
-  $("tentativeSuggestions").innerHTML = suggestions.length
-    ? `<span>Suggested windows</span>${suggestions
-        .map((window) => `<button type="button" data-window="${window.start.getTime()}" data-window-end="${window.end.getTime()}">${escapeHtml(formatWindow(window))}</button>`)
+  const options = timeOptionsForPlan(plan);
+  $("tentativeSuggestions").innerHTML = options.length
+    ? `<span>${plan.chosen ? "Other times" : "Vote on a time, then pick one"}</span>${options
+        .map((option) => {
+          const mine = option.voters.includes(memberId);
+          const names = option.voters.map((id) => session.state.members.find((member) => member.id === id)?.name).filter(Boolean);
+          return `<span class="time-option${mine ? " voted" : ""}">` +
+            `<button type="button" class="time-vote" data-vote-time="${option.start.toISOString()}" aria-pressed="${mine}" title="${escapeAttribute(names.length ? `Votes: ${names.join(", ")}` : "No votes yet")}" aria-label="${mine ? "Remove your vote for" : "Vote for"} ${escapeAttribute(formatWindow(option))}">${svgIcon(mine ? "heart-fill" : "heart")} ${option.voters.length}</button>` +
+            `<button type="button" data-window="${option.start.getTime()}" data-window-end="${option.end.getTime()}" title="Pick this time">${escapeHtml(formatWindow(option))}</button></span>`;
+        })
         .join("")}`
     : '<span>No shared window in that range yet — add more times or widen the search.</span>';
 
+  renderRsvp(plan, occurrence);
   renderCalendarAdd(plan);
+}
+
+/** Suggested windows plus any time someone has voted for, most votes first. */
+function timeOptionsForPlan(plan) {
+  const now = new Date();
+  const length = settings().minWindowHours * 3600 * 1000;
+  const votes = plan.timeVotes || {};
+  const byStart = new Map(suggestionsForPlan(plan).map((window) => [window.start.toISOString(), { start: window.start, end: window.end }]));
+  for (const key of Object.keys(votes)) {
+    if (!byStart.has(key)) byStart.set(key, { start: new Date(key), end: new Date(new Date(key).getTime() + length) });
+  }
+  const chosen = plan.chosen ? new Date(plan.chosen).toISOString() : null;
+  return [...byStart.entries()]
+    .filter(([key, option]) => key !== chosen && option.end > now)
+    .map(([key, option]) => ({ ...option, voters: votes[key] || [] }))
+    .sort((a, b) => b.voters.length - a.voters.length || a.start - b.start)
+    .slice(0, 5);
+}
+
+function renderRsvp(plan, occurrence) {
+  const row = $("rsvpRow");
+  row.hidden = !occurrence;
+  if (!occurrence) return;
+  const mine = rsvpAnswers(plan, occurrence)[memberId];
+  for (const button of row.querySelectorAll("[data-rsvp]")) {
+    const active = button.dataset.rsvp === mine;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  }
+  const groups = rsvpSummary(plan, occurrence, session.state.members);
+  const names = (list) => list.map((member) => member.name).join(", ");
+  $("rsvpSummary").textContent = [
+    groups.yes.length ? `Going: ${names(groups.yes)}` : "",
+    groups.maybe.length ? `Maybe: ${names(groups.maybe)}` : "",
+    groups.no.length ? `Can’t: ${names(groups.no)}` : "",
+    groups.waiting.length ? `${groups.waiting.length} haven’t answered` : "",
+  ].filter(Boolean).join(" · ");
 }
 
 /* Add to calendar */
@@ -810,7 +907,7 @@ function addedRecords() {
 
 /** The key names this plan at this exact time, so moving it re-enables adding. */
 function addedKey(plan) {
-  return `${planUid(plan, session.slug)}|${plan.chosen}|${plan.chosenEnd || ""}`;
+  return `${planUid(plan, session.slug)}|${plan.chosen}|${plan.chosenEnd || ""}|${plan.repeat || "none"}`;
 }
 
 function renderCalendarAdd(plan) {
@@ -1179,9 +1276,12 @@ async function storeImportedBlocks(events, sourceKey, range, { quiet = false } =
  * them go together, so refreshing one calendar link never wipes another's.
  */
 async function publishKindToGroup(kind, range, { quiet = false } = {}) {
+  await refreshHiddenKeys();
   const blocks = Object.entries(myEvents)
     .filter(([key]) => sourceKind(key) === kind)
     .flatMap(([, entry]) => entry?.events || [])
+    // Private events never reach the group, not even as busy time.
+    .filter((event) => !isHidden(hiddenKeys, event.title))
     .map((event) => ({
       start: new Date(event.start),
       end: new Date(event.end),
@@ -1998,6 +2098,8 @@ $("googleSignInButton").addEventListener("click", async () => {
   }
 });
 
+$("gateSignIn").addEventListener("click", () => $("googleSignInButton").click());
+
 $("signOutButton").addEventListener("click", async () => {
   if (!supabaseClient) return;
   await supabaseClient.auth.signOut();
@@ -2040,6 +2142,7 @@ function openPlanDialog() {
   $("planStart").value = plan?.start || "";
   $("planEnd").value = plan?.end || "";
   $("dateRangeFields").hidden = plan?.timing !== "range";
+  $("planRepeat").innerHTML = REPEATS.map((entry) => `<option value="${entry.key}"${(plan?.repeat || "none") === entry.key ? " selected" : ""}>${entry.label}</option>`).join("");
   openDialog(dialogs.plan);
 }
 
@@ -2068,8 +2171,16 @@ $("tentativePlanForm").addEventListener("submit", async (event) => {
     timing: String(form.get("timing") || "week"),
     start: String(form.get("start") || ""),
     end: String(form.get("end") || ""),
+    repeat: String(form.get("repeat") || "none"),
     updatedAt: new Date().toISOString(),
   };
+  // Editing the plan keeps the picked time, votes and RSVPs.
+  const previous = session.state.plan;
+  if (previous) {
+    for (const key of ["chosen", "chosenEnd", "timeZone", "timeVotes", "rsvp"]) {
+      if (previous[key] !== undefined) plan[key] = previous[key];
+    }
+  }
   if (plan.timing === "range" && plan.start && plan.end && plan.end < plan.start) {
     showToast("The end of the range comes before the start.");
     return;
@@ -2081,6 +2192,20 @@ $("tentativePlanForm").addEventListener("submit", async (event) => {
   showToast("Tentative plan saved — suggested windows are below.");
 });
 
+$("rsvpRow").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-rsvp]");
+  if (!button) return;
+  const answer = button.dataset.rsvp;
+  let result = null;
+  await mutate((draft) => {
+    const occurrence = draft.plan && nextOccurrence(draft.plan);
+    if (!occurrence) return;
+    draft.plan.rsvp = applyRsvp(draft.plan, occurrence, memberId, answer);
+    result = draft.plan.rsvp.answers[memberId] || null;
+  });
+  showToast(result === "yes" ? "You’re going." : result === "maybe" ? "Marked as maybe." : result === "no" ? "Got it — you can’t make it." : "Answer cleared.");
+});
+
 $("removeTentativePlan").addEventListener("click", async () => {
   await mutate((draft) => {
     draft.plan = null;
@@ -2089,6 +2214,17 @@ $("removeTentativePlan").addEventListener("click", async () => {
 });
 
 $("tentativeSuggestions").addEventListener("click", async (event) => {
+  const vote = event.target.closest("[data-vote-time]");
+  if (vote) {
+    const key = vote.dataset.voteTime;
+    const adding = !(session.state.plan?.timeVotes?.[key] || []).includes(memberId);
+    await mutate((draft) => {
+      if (!draft.plan) return;
+      draft.plan.timeVotes = toggleTimeVote(draft.plan.timeVotes, key, memberId);
+    });
+    showToast(adding ? "Vote added." : "Vote removed.");
+    return;
+  }
   const button = event.target.closest("[data-window]");
   if (!button) return;
   const chosen = new Date(Number(button.dataset.window));
@@ -2103,6 +2239,7 @@ $("tentativeSuggestions").addEventListener("click", async (event) => {
     draft.plan.id = draft.plan.id || createId("plan");
     draft.plan.chosen = chosen.toISOString();
     draft.plan.chosenEnd = chosenEnd.toISOString();
+    draft.plan.timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     draft.plan.updatedAt = new Date().toISOString();
   }, { note: `Pencilled in for ${formatDayStamp(chosen)} at ${formatClock(chosen)}` });
   showToast(`Pencilled in for ${formatDayStamp(chosen)} at ${formatClock(chosen)}.`);
@@ -2176,12 +2313,15 @@ function friendGroups() {
   return partitionRequests(friends.rows, { userId: ui.user?.id, email: ui.user?.email });
 }
 
-function friendRowMarkup(row, actions) {
+function friendRowMarkup(row, actions, { withStatus = false } = {}) {
   const party = describeParty(row, { userId: ui.user?.id, profiles: friends.profiles });
   const photo = safeImageUrl(party.photo);
+  const status = withStatus ? statusLine(party.id) : null;
   return `<div class="friend-row">
-    <div class="avatar avatar-lilac"${photo ? ` style="background-image:url(&quot;${escapeAttribute(photo)}&quot;);background-size:cover;background-position:center"` : ""}>${photo ? "" : escapeHtml(initialsFor(party.name))}</div>
-    <div><strong>${escapeHtml(party.name)}</strong><small>${escapeHtml(party.pendingSignup ? "Waiting for them to sign in" : party.email || "")}</small></div>
+    <div class="avatar avatar-lilac${status?.kind === "free-now" ? " is-free" : ""}"${photo ? ` style="background-image:url(&quot;${escapeAttribute(photo)}&quot;);background-size:cover;background-position:center"` : ""}>${photo ? "" : escapeHtml(initialsFor(party.name))}</div>
+    <div><strong>${escapeHtml(party.name)}</strong><small>${escapeHtml(party.pendingSignup ? "Waiting for them to sign in" : party.email || "")}</small>${
+      status ? `<small class="friend-status ${status.kind}">${escapeHtml(status.text)}</small>` : ""
+    }</div>
     <div class="friend-actions">${actions}</div>
   </div>`;
 }
@@ -2228,11 +2368,12 @@ function renderFriends(errorMessage) {
           const calendar = party.id
             ? `<button type="button" class="quiet" data-view-calendar="${escapeAttribute(party.id)}" data-friend-name="${escapeAttribute(party.name)}">Calendar</button>`
             : "";
-          return friendRowMarkup(row, calendar + action);
+          return friendRowMarkup(row, calendar + action, { withStatus: true });
         })
         .join("")
     : `<p class="form-hint">${escapeHtml(errorMessage || "No friends yet. Send a request above, or just share the invite link.")}</p>`;
 
+  renderStatusCard();
   $("friendBadge").textContent = String(incoming.length);
   $("friendBadge").hidden = incoming.length === 0;
   $("friendsTab").textContent = incoming.length ? `Friends (${incoming.length})` : "Friends";
@@ -2582,6 +2723,15 @@ $("ideaGrid").addEventListener("click", async (event) => {
     openIdeaDialog(session.state.ideas.find((idea) => idea.id === edit.dataset.editIdea));
     return;
   }
+  const planIdea = event.target.closest("[data-plan-idea]");
+  if (planIdea) {
+    const idea = session.state.ideas.find((entry) => entry.id === planIdea.dataset.planIdea);
+    if (!idea) return;
+    openPlanDialog();
+    $("planActivity").value = idea.title;
+    $("planLocation").value = idea.location || "";
+    return;
+  }
   const vote = event.target.closest("[data-vote-idea]");
   if (!vote) return;
   const id = vote.dataset.voteIdea;
@@ -2767,9 +2917,52 @@ function fingerprint(text) {
   return `${text.length}:${hash >>> 0}`;
 }
 
-function saveSharing(next) {
-  sharing = normalizeSharing(next);
+/** Saves your choices here, and (signed in) to your account so other devices get them. */
+function saveSharing(next, { stamp = true } = {}) {
+  sharing = normalizeSharing(stamp ? { ...next, updatedAt: new Date().toISOString() } : next);
   writeJson(STORAGE.sharing, sharing);
+  if (stamp) scheduleSharingUpload();
+}
+
+let sharingUploadTimer = null;
+function scheduleSharingUpload() {
+  clearTimeout(sharingUploadTimer);
+  sharingUploadTimer = setTimeout(uploadSharing, 800);
+}
+
+async function uploadSharing() {
+  if (!sharingSettingsStore || !ui.user || !sharing.updatedAt) return;
+  const { error } = await sharingSettingsStore.save(ui.user.id, sharing);
+  if (error) console.warn("Sharing choices not synced:", error.message);
+}
+
+/**
+ * Brings this device and your account into line: whichever copy was saved
+ * last wins, and everything published from it is refreshed.
+ */
+async function loadRemoteSharing() {
+  if (!sharingSettingsStore || !ui.user) return;
+  const { data, error } = await sharingSettingsStore.load(ui.user.id);
+  if (error) return;
+  const remote = data ? { ...data.settings, updatedAt: data.settings?.updatedAt || data.updated_at } : null;
+  const { sharing: merged, from } = mergeSharing(sharing, remote);
+  if (from === "local") {
+    if (sharing.updatedAt && remote?.updatedAt !== sharing.updatedAt) uploadSharing();
+    return;
+  }
+  const hiddenChanged = JSON.stringify(merged.hidden) !== JSON.stringify(sharing.hidden) || merged.salt !== sharing.salt;
+  const changed = JSON.stringify(merged) !== JSON.stringify(sharing);
+  saveSharing(merged, { stamp: false });
+  if (!changed) return;
+  await refreshHiddenKeys();
+  renderMyCalendar();
+  schedulePublish();
+  if (hiddenChanged || session.state.privacy === "details") await republishToGroup();
+}
+
+async function refreshHiddenKeys() {
+  hiddenKeys = await resolveHidden(sharing, allMyEvents().map((event) => event.title));
+  return hiddenKeys;
 }
 
 function acceptedFriends() {
@@ -2789,18 +2982,27 @@ function schedulePublish() {
  * Gives each friend exactly what their level allows: one row per friend,
  * rewritten only when it changes, and deleted for anyone set to "Nothing".
  */
+let grantTimer = null;
+
 async function publishToFriends() {
   if (!shareStore || !ui.user || !friends.loaded) return;
   const ownerId = ui.user.id;
   const published = readJson(STORAGE.published, {});
   const mine = published[ownerId] || {};
-  const events = allMyEvents();
+  await refreshHiddenKeys();
+  const events = withoutHidden(allMyEvents(), hiddenKeys);
+  const now = new Date();
   let failed = false;
   for (const { party } of acceptedFriends()) {
-    const payload = eventsForLevel(events, levelForFriend(sharing, party.id), sharing);
-    const print = payload === null ? "none" : fingerprint(JSON.stringify(payload));
+    // A temporary share sends the fuller view plus what they fall back to;
+    // the database switches between them on time.
+    const grant = activeGrant(sharing, party.id, now);
+    const base = eventsForLevel(events, baseLevelForFriend(sharing, party.id), sharing);
+    const payload = grant ? eventsForLevel(events, grant.level, sharing) : base;
+    const options = grant ? { fallback: base, expires: grant.until } : {};
+    const print = payload === null ? "none" : fingerprint(JSON.stringify([payload, options]));
     if (mine[party.id] === print) continue;
-    const { error } = payload === null ? await shareStore.revoke(ownerId, party.id) : await shareStore.publish(ownerId, party.id, payload);
+    const { error } = payload === null ? await shareStore.revoke(ownerId, party.id) : await shareStore.publish(party.id, payload, options);
     if (error) {
       failed = true;
       continue;
@@ -2810,6 +3012,17 @@ async function publishToFriends() {
   published[ownerId] = mine;
   writeJson(STORAGE.published, published);
   if (failed) showToast("Some friends' calendar views could not be updated. They'll retry next time.");
+
+  // Tidy up when the next temporary share ends (the database already stopped showing it).
+  clearTimeout(grantTimer);
+  const next = Math.min(...sharing.grants.map((grant) => new Date(grant.until).getTime()).filter((time) => time > Date.now()));
+  if (Number.isFinite(next)) {
+    grantTimer = setTimeout(() => {
+      saveSharing(sharing, { stamp: false });
+      renderMyCalendar();
+      schedulePublish();
+    }, Math.min(next - Date.now() + 1000, 2 ** 31 - 1));
+  }
 }
 
 function myWeek() {
@@ -2853,9 +3066,12 @@ function agendaMarkup(week, events, { owner = true, emptyText }) {
                 return `<li class="agenda-event${event.title ? "" : " is-busy"}"><span class="agenda-time">${escapeHtml(time)}</span><strong>${escapeHtml(title)}</strong></li>`;
               }
               const picked = isPicked(sharing, event.title);
-              return `<li><button type="button" class="agenda-event${picked ? " is-picked" : ""}" data-pick-title="${escapeAttribute(event.title)}" aria-pressed="${picked}">
+              const hidden = isHidden(hiddenKeys, event.title);
+              const state = hidden ? "Private: hidden from everyone" : picked ? "Picked to share" : "Tap to pick";
+              return `<li class="agenda-row${hidden ? " is-private" : ""}"><button type="button" class="agenda-event${picked && !hidden ? " is-picked" : ""}" data-pick-title="${escapeAttribute(event.title)}" aria-pressed="${picked}"${hidden ? " disabled" : ""}>
                 <span class="agenda-time">${escapeHtml(time)}</span><strong>${escapeHtml(title)}</strong>
-                <span class="pick-state">${picked ? "Picked to share" : "Tap to pick"}</span></button></li>`;
+                <span class="pick-state">${state}</span></button>
+                <button type="button" class="agenda-private" data-private-title="${escapeAttribute(event.title)}" aria-pressed="${hidden}" title="${hidden ? "Make visible again" : "Make private: hide from everyone"}" aria-label="${hidden ? "Make visible again" : "Make private"}: ${escapeAttribute(event.title)}">${svgIcon("lock")}</button></li>`;
             })
             .join("")
         : `<li class="agenda-empty">${escapeHtml(emptyText)}</li>`;
@@ -2910,7 +3126,7 @@ function renderMyCalendar() {
     agenda.innerHTML = `<div class="agenda-blank"><strong>They can't see your calendar at all.</strong><p>In a group you share, they still see when you're busy, because that's how the group finds a time.</p></div>`;
     return;
   }
-  const visible = eventsForLevel(events, level, sharing);
+  const visible = eventsForLevel(withoutHidden(events, hiddenKeys), level, sharing);
   summary.innerHTML = `Previewing as they see it: <strong>${escapeHtml(LEVEL_LABELS[level])}</strong>.`;
   agenda.innerHTML = agendaMarkup(week, visible, { owner: false, emptyText: "Free" });
 }
@@ -2935,6 +3151,18 @@ $("mycalPreview").addEventListener("change", (event) => {
 $("myAgenda").addEventListener("click", async (event) => {
   if (event.target.closest("[data-open-calendars]")) {
     openDialog(dialogs.calendar);
+    return;
+  }
+  const privateButton = event.target.closest("[data-private-title]");
+  if (privateButton) {
+    const title = privateButton.dataset.privateTitle;
+    const wasHidden = isHidden(hiddenKeys, title);
+    saveSharing(await toggleHidden(sharing, title));
+    await refreshHiddenKeys();
+    renderMyCalendar();
+    schedulePublish();
+    await republishToGroup();
+    showToast(wasHidden ? `"${title}" is visible again, as your sharing settings allow.` : `"${title}" is private: nobody sees it, not even as busy.`);
     return;
   }
   const button = event.target.closest("[data-pick-title]");
@@ -2971,10 +3199,11 @@ function renderSharingDialog() {
     : list.length
       ? list
           .map(
-            ({ party }) => `<label class="share-friend-row"><span>${escapeHtml(party.name)}</span>
+            ({ party }) => `<div class="share-friend"><label class="share-friend-row"><span>${escapeHtml(party.name)}</span>
               <select class="text-input" data-share-friend="${escapeAttribute(party.id)}">${levelOptions(LEVELS, sharing.perFriend[party.id] || "", {
                 defaultLabel: `Default (${LEVEL_LABELS[sharing.friends]})`,
-              })}</select></label>`
+              })}</select></label>
+              <div class="share-grant" data-grant-slot="${escapeAttribute(party.id)}">${grantSlotMarkup(party)}</div></div>`
           )
           .join("")
       : '<p class="form-hint">No friends yet. Add them under Manage people → Friends.</p>';
@@ -2984,7 +3213,70 @@ function renderSharingDialog() {
         .map((key) => `<button type="button" class="share-picked-chip" data-unpick="${escapeAttribute(key)}">${escapeHtml(key)} <span aria-hidden="true">×</span></button>`)
         .join("")
     : '<p class="form-hint">None yet. Tap an event in Your calendar to pick it.</p>';
+
+  const privateNames = [...new Set(allMyEvents().filter((event) => isHidden(hiddenKeys, event.title)).map((event) => event.title))];
+  const elsewhere = Math.max(0, sharing.hidden.length - hiddenKeys.size);
+  $("sharePrivateList").innerHTML =
+    privateNames
+      .map((title) => `<button type="button" class="share-picked-chip is-private" data-unhide="${escapeAttribute(title)}">${svgIcon("lock")} ${escapeHtml(title)} <span aria-hidden="true">×</span></button>`)
+      .join("") +
+    (elsewhere ? `<p class="form-hint">${elsewhere} more not in the calendars on this device.</p>` : "") ||
+    '<p class="form-hint">None. Tap the lock on an event in Your calendar to make it private.</p>';
+  $("shareSyncNote").textContent = ui.user
+    ? "These choices follow you to any device you sign in on."
+    : "Sign in and these choices follow you to your other devices.";
 }
+
+const whenLabel = (date) => `${formatDayStamp(date)}, ${formatClock(date)}`;
+
+/** A friend's "for a while" control: the running share, or the form to start one. */
+function grantSlotMarkup(party) {
+  const grant = activeGrant(sharing, party.id);
+  if (grant) {
+    return `<p class="grant-on">${svgIcon("clock")} <span><strong>${escapeHtml(LEVEL_LABELS[grant.level])}</strong> until ${escapeHtml(whenLabel(new Date(grant.until)))}</span>
+      <button type="button" class="text-button" data-stop-grant="${escapeAttribute(party.id)}">Stop</button></p>`;
+  }
+  const levels = ["all", "some", "busy"].map((level) => `<option value="${level}">${escapeHtml(LEVEL_LABELS[level])}</option>`).join("");
+  const lengths = GRANT_LENGTHS.map((entry) => `<option value="${entry.key}">${escapeHtml(entry.label)}</option>`).join("");
+  return `<details><summary>Share more for a while</summary><div class="grant-form">
+    <select class="text-input" data-grant-level aria-label="What ${escapeAttribute(party.name)} sees">${levels}</select>
+    <select class="text-input" data-grant-length aria-label="For how long">${lengths}</select>
+    <button type="button" class="outline-button" data-start-grant="${escapeAttribute(party.id)}">Start</button></div></details>`;
+}
+
+$("shareFriendList").addEventListener("click", (event) => {
+  const start = event.target.closest("[data-start-grant]");
+  const stop = event.target.closest("[data-stop-grant]");
+  if (!start && !stop) return;
+  const id = (start || stop).dataset.startGrant || (start || stop).dataset.stopGrant;
+  const party = acceptedFriends().find((entry) => entry.party.id === id)?.party;
+  if (!party) return;
+  if (start) {
+    const form = start.closest(".grant-form");
+    const level = form.querySelector("[data-grant-level]").value;
+    const until = grantEnd(form.querySelector("[data-grant-length]").value);
+    saveSharing(setGrant(sharing, id, level, until));
+    showToast(`${party.name} sees ${LEVEL_LABELS[level].toLowerCase()} until ${whenLabel(until)}, then it goes back.`);
+  } else {
+    saveSharing(clearGrant(sharing, id));
+    showToast(`Back to your usual setting for ${party.name}.`);
+  }
+  // Only this friend's slot, so unsaved changes elsewhere in the dialog stay put.
+  document.querySelector(`[data-grant-slot="${CSS.escape(id)}"]`).innerHTML = grantSlotMarkup(party);
+  renderMyCalendar();
+  schedulePublish();
+});
+
+$("sharePrivateList").addEventListener("click", async (event) => {
+  const chip = event.target.closest("[data-unhide]");
+  if (!chip) return;
+  saveSharing(await toggleHidden(sharing, chip.dataset.unhide));
+  await refreshHiddenKeys();
+  renderSharingDialog();
+  renderMyCalendar();
+  schedulePublish();
+  await republishToGroup();
+});
 
 $("sharingButton").addEventListener("click", () => {
   renderSharingDialog();
@@ -3033,7 +3325,10 @@ function renderFriendCalendar() {
     body.innerHTML = `<div class="agenda-blank"><strong>${escapeHtml(view.name)} isn't sharing their calendar with you.</strong><p>You'll still see when they're busy in groups you share.</p></div>`;
     return;
   }
-  $("friendCalendarUpdated").textContent = view.updatedAt ? `Updated ${formatRelative(view.updatedAt)}` : "";
+  $("friendCalendarUpdated").textContent = [
+    view.sharedUntil ? `Shared with you until ${whenLabel(new Date(view.sharedUntil))}` : "",
+    view.updatedAt ? `Updated ${formatRelative(view.updatedAt)}` : "",
+  ].filter(Boolean).join(" · ");
   body.innerHTML = `<div class="agenda compact-agenda">${agendaMarkup(week, view.events, { owner: false, emptyText: "Free" })}</div>`;
 }
 
@@ -3042,11 +3337,12 @@ async function openFriendCalendar(friendId, name) {
   $("friendCalendarUpdated").textContent = "";
   renderFriendCalendar();
   openDialog(dialogs.friendCalendar);
-  const { data, error } = await shareStore.sharedWithMe(friendId, ui.user.id);
+  const { data, error } = await shareStore.sharedWithMe(friendId);
   if (ui.friendCalendar?.id !== friendId) return;
   ui.friendCalendar.loading = false;
   ui.friendCalendar.events = error || !data ? null : cleanSharedEvents(data.events);
   ui.friendCalendar.updatedAt = data?.updated_at || null;
+  ui.friendCalendar.sharedUntil = data?.shared_until || null;
   if (error) showToast("Couldn't load their calendar. Try again in a moment.");
   renderFriendCalendar();
 }
@@ -3078,6 +3374,100 @@ for (const item of document.querySelectorAll(".nav-item")) {
   });
 }
 
+/* Free now: your status, and friends at a glance */
+
+/** One friend's line under their name, or null when there's nothing to say. */
+function statusLine(friendId) {
+  const status = friendStatus({ presence: glance.presence.get(friendId), events: glance.shares.get(friendId) });
+  if (!status) return null;
+  if (status.kind === "free-now") {
+    return { kind: status.kind, text: `Free now until ${formatClock(status.until)}${status.note ? ` · ${status.note}` : ""}` };
+  }
+  if (status.kind === "busy") return { kind: status.kind, text: `Busy until ${formatClock(status.until)}` };
+  return { kind: status.kind, text: status.until ? `No plans until ${formatClock(status.until)}` : "No more plans today" };
+}
+
+async function loadGlance() {
+  if (!ui.user || !presenceStore || !shareStore) {
+    glance.presence.clear();
+    glance.shares.clear();
+    renderFreeNow();
+    return;
+  }
+  const [presence, shares] = await Promise.all([presenceStore.listActive(), shareStore.sharedWithMeAll()]);
+  if (!presence.error) glance.presence = new Map(presence.data.map((row) => [row.user_id, row]));
+  if (!shares.error) glance.shares = new Map(shares.data.map((row) => [row.owner_id, cleanSharedEvents(row.events)]));
+  renderFriends();
+  renderFreeNow();
+}
+
+/** The strip on the main page: friends who said they're free right now. */
+function renderFreeNow() {
+  const strip = $("freeNowStrip");
+  const now = new Date();
+  const free = acceptedFriends()
+    .map(({ party }) => ({ party, presence: glance.presence.get(party.id) }))
+    .filter(({ presence }) => presence && new Date(presence.until) > now);
+  strip.hidden = !free.length;
+  if (!free.length) {
+    strip.innerHTML = "";
+    return;
+  }
+  strip.innerHTML = `<span class="free-now-label"><span class="status-dot" aria-hidden="true"></span>Free now</span>${free
+    .map(({ party, presence }) => {
+      const photo = safeImageUrl(party.photo);
+      return `<button type="button" class="free-chip" data-view-calendar="${escapeAttribute(party.id)}" data-friend-name="${escapeAttribute(party.name)}">
+        <span class="avatar avatar-lilac"${photo ? ` style="background-image:url(&quot;${escapeAttribute(photo)}&quot;);background-size:cover;background-position:center"` : ""}>${photo ? "" : escapeHtml(initialsFor(party.name))}</span>
+        <span><strong>${escapeHtml(party.name)}</strong><small>until ${escapeHtml(formatClock(new Date(presence.until)))}${presence.note ? ` · ${escapeHtml(presence.note)}` : ""}</small></span></button>`;
+    })
+    .join("")}`;
+}
+
+$("freeNowStrip").addEventListener("click", (event) => {
+  const chip = event.target.closest("[data-view-calendar]");
+  if (!chip || !shareStore || !ui.user) return;
+  openFriendCalendar(chip.dataset.viewCalendar, chip.dataset.friendName || "Your friend");
+});
+
+/** Your own status, at the top of the Friends tab. */
+function renderStatusCard() {
+  const mine = ui.user ? glance.presence.get(ui.user.id) : null;
+  const on = Boolean(mine && new Date(mine.until) > new Date());
+  $("statusCard").classList.toggle("on", on);
+  $("statusTitle").textContent = on ? `You're free until ${formatClock(new Date(mine.until))}` : "Free right now?";
+  $("statusDetail").textContent = on ? (mine.note ? `“${mine.note}” · friends can see this` : "Your friends can see this.") : "Let your friends know at a glance.";
+  $("statusActions").innerHTML = on
+    ? '<button type="button" class="outline-button" id="freeStop">Stop</button>'
+    : `<select class="text-input" id="freeLength" aria-label="For how long">${FREE_LENGTHS.map((entry) => `<option value="${entry.key}">${escapeHtml(entry.label)}</option>`).join("")}</select>
+       <input class="text-input" id="freeNote" maxlength="80" placeholder="Up for coffee? (optional)" aria-label="Note for friends" />
+       <button type="button" class="primary-button" id="freeStart">I'm free</button>`;
+}
+
+$("statusActions").addEventListener("click", async (event) => {
+  if (!presenceStore || !ui.user) return;
+  const start = event.target.closest("#freeStart");
+  const stop = event.target.closest("#freeStop");
+  if (!start && !stop) return;
+  (start || stop).disabled = true;
+  const { error } = start
+    ? await presenceStore.set(ui.user.id, freeUntil($("freeLength").value), $("freeNote").value)
+    : await presenceStore.clear(ui.user.id);
+  if (error) {
+    (start || stop).disabled = false;
+    showToast("Couldn't update your status. Try again in a moment.");
+    return;
+  }
+  await loadGlance();
+  showToast(start ? "Friends can see you're free." : "Status cleared.");
+});
+
+setInterval(() => {
+  if (document.visibilityState === "visible") loadGlance();
+}, 5 * 60 * 1000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") loadGlance();
+});
+
 /* ------------------------------------------------------------- startup */
 
 let previousUserId = null;
@@ -3103,11 +3493,17 @@ async function start() {
       friends.loaded = false;
       if (authSession?.user) {
         await loadRemoteProfile(authSession.user);
-        await ensureMembership();
+        // Coming through the sign-in gate: load the group now (that joins it too).
+        if (session.needsSignIn) await loadWorkspace();
+        else await ensureMembership();
         await loadFriends({ force: true });
+        await loadRemoteSharing();
+        loadGlance();
         loadRemoteGroups();
       } else {
         renderFriends();
+        loadGlance();
+        if (session.slug !== DEMO_SLUG) await loadWorkspace();
       }
     });
     if (data.session?.user) await loadRemoteProfile(data.session.user);
@@ -3119,6 +3515,10 @@ async function start() {
   await applyPendingName();
   recordVisit();
   await loadFriends();
+  await refreshHiddenKeys();
+  renderMyCalendar();
+  await loadRemoteSharing();
+  loadGlance();
   autoSyncCalendars();
 
   // Coming back from the Google consent screen: pull busy times straight away.
@@ -3177,3 +3577,36 @@ async function loadRemoteProfile(user) {
 }
 
 start();
+
+/* Home screen app */
+
+let installPrompt = null;
+
+function renderInstallCard() {
+  const mode = installMode({ standalone: isStandalone(), canPrompt: Boolean(installPrompt), userAgent: navigator.userAgent, maxTouchPoints: navigator.maxTouchPoints });
+  $("installCard").hidden = mode === "none";
+  $("installButton").hidden = mode !== "prompt";
+  $("installSteps").innerHTML = mode === "ios"
+    ? `In Safari, tap Share ${svgIcon("share")} then <strong>Add to Home Screen</strong>.`
+    : "Opens like an app, full screen, no App Store.";
+}
+
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  installPrompt = event;
+  renderInstallCard();
+});
+window.addEventListener("appinstalled", () => {
+  installPrompt = null;
+  renderInstallCard();
+  showToast("Waddle is on your home screen.");
+});
+$("installButton").addEventListener("click", async () => {
+  if (!installPrompt) return;
+  const prompt = installPrompt;
+  installPrompt = null;
+  await prompt.prompt();
+  renderInstallCard();
+});
+renderInstallCard();
+registerServiceWorker();

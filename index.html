@@ -5,7 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f4eee6" />
     <meta name="description" content="Waddle finds the time everyone is free, then helps your group pick something worth doing." />
-    <link rel="icon" href="data:," />
+    <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/icons/icon-32.png" sizes="32x32" type="image/png" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Waddle" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Waddle — Make time for each other</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -38,6 +45,16 @@
         </div>
       </aside>
 
+      <section class="signin-gate" id="signInGate" hidden aria-labelledby="gateTitle">
+        <div class="signin-card">
+          <p class="booking-brand"><span aria-hidden="true">🐧</span> waddle</p>
+          <p class="eyebrow">YOU'RE INVITED</p>
+          <h1 id="gateTitle">Sign in to join this group</h1>
+          <p>Groups share when people are free, so only signed-in people can open them. It's free and takes one tap with Google.</p>
+          <button class="primary-button full" type="button" id="gateSignIn">Sign in with Google</button>
+          <a class="text-button" href="/">Just looking? Try the demo group</a>
+        </div>
+      </section>
       <main class="main-content">
         <header class="topbar">
           <button class="mobile-menu" id="mobileMenu" aria-label="Open menu" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#i-menu"/></svg></button>
@@ -92,6 +109,8 @@
             </div>
           </section>
 
+          <section class="free-now" id="freeNowStrip" hidden aria-label="Friends who are free now"></section>
+
           <section class="tentative-section" id="tentativePlanSection" hidden>
             <div class="section-heading compact">
               <div><p class="eyebrow">JUST A THOUGHT</p><h2>Keep a maybe on the calendar</h2><p>Save the idea now and find the best time with your group later.</p></div>
@@ -107,6 +126,15 @@
                 <h3 id="tentativeTitle"></h3>
                 <p id="tentativeTiming"></p>
                 <div class="suggestions" id="tentativeSuggestions"></div>
+                <div class="rsvp" id="rsvpRow" hidden>
+                  <span>Are you in?</span>
+                  <div class="rsvp-buttons" role="group" aria-label="Your answer">
+                    <button type="button" data-rsvp="yes">Going</button>
+                    <button type="button" data-rsvp="maybe">Maybe</button>
+                    <button type="button" data-rsvp="no">Can’t make it</button>
+                  </div>
+                  <small id="rsvpSummary"></small>
+                </div>
                 <div class="calendar-add" id="calendarAdd" hidden>
                   <span>Add to your calendar</span>
                   <a class="calendar-add-button" id="addToGoogle" href="#" target="_blank" rel="noopener">Google Calendar</a>
@@ -272,6 +300,9 @@
           <div><label class="field-label" for="planStart">From</label><input class="text-input" type="date" id="planStart" name="start" /></div>
           <div><label class="field-label" for="planEnd">To</label><input class="text-input" type="date" id="planEnd" name="end" /></div>
         </div>
+        <label class="field-label" for="planRepeat">Repeat</label>
+        <select class="text-input" id="planRepeat" name="repeat"></select>
+        <p class="form-hint">Once a time is picked, a repeating plan rolls on to the next date by itself, and each date gets its own RSVPs.</p>
         <button class="primary-button full" type="submit">Save tentative plan</button>
       </form>
     </dialog>
@@ -296,10 +327,15 @@
       </form>
       <div id="friendsPanel" class="people-form" hidden>
         <div id="friendsSignedOut" hidden>
-          <p class="form-hint">Friend requests need an account, so both people can be reached. The invite link above works without one.</p>
+          <p class="form-hint">Friend requests need an account, so both people can be reached. The invite link above works too; they sign in with Google when they open it.</p>
           <button class="google-button" id="friendsSignInButton" type="button"><span class="google-logo">G</span> Continue with Google</button>
         </div>
         <div id="friendsSignedIn" hidden>
+          <div class="status-card" id="statusCard">
+            <span class="status-dot" aria-hidden="true"></span>
+            <div class="status-copy"><strong id="statusTitle">Free right now?</strong><small id="statusDetail">Let your friends know at a glance.</small></div>
+            <div class="status-actions" id="statusActions"></div>
+          </div>
           <form id="friendRequestForm">
             <label class="field-label" for="friendRequestEmail">Send a friend request</label>
             <div class="copy-row">
@@ -378,6 +414,14 @@
       <p class="field-label" id="appearanceLabel">Appearance</p>
       <div class="palette-picker appearance-picker" id="appearancePicker" role="radiogroup" aria-labelledby="appearanceLabel"></div>
       <p class="form-hint">Just for you, on this device.</p>
+      <div class="install-card" id="installCard" hidden>
+        <img src="/icons/icon-192.png" alt="" width="40" height="40" />
+        <div>
+          <strong>Put Waddle on your home screen</strong>
+          <small id="installSteps">Opens like an app, full screen, no App Store.</small>
+        </div>
+        <button class="outline-button" type="button" id="installButton" hidden>Install</button>
+      </div>
       <form id="settingsForm">
         <label class="field-label" for="settingWorkspaceName">Group name</label>
         <input class="text-input" id="settingWorkspaceName" maxlength="60" required />
@@ -387,7 +431,7 @@
           <div><label class="field-label" for="settingDayStart">Day starts</label><select class="text-input" id="settingDayStart"></select></div>
           <div><label class="field-label" for="settingDayEnd">Day ends</label><select class="text-input" id="settingDayEnd"></select></div>
         </div>
-        <label class="schedule-toggle"><input type="checkbox" id="settingLocked" /><span><strong>Only signed-in members can edit</strong><small>Without this, anyone holding the invite link can change this workspace.</small></span></label>
+        <label class="schedule-toggle"><input type="checkbox" id="settingLocked" /><span><strong>Only signed-in members can edit</strong><small>Without this, anyone signed in with the invite link can join and edit.</small></span></label>
         <p class="form-hint" id="lockHint"></p>
         <button class="primary-button full" type="submit">Save settings</button>
       </form>
@@ -407,11 +451,16 @@
       <p class="field-label">Change it for one friend</p>
       <p class="form-hint" id="shareSignedOut" hidden>Sign in to share with friends. Friends need an account so only they can see it.</p>
       <div class="share-friend-list" id="shareFriendList"></div>
+      <p class="form-hint">“For a while” shares more with one friend, then goes back by itself — even if your phone is off.</p>
       <label class="field-label" for="shareGroups">Groups see</label>
       <select class="text-input" id="shareGroups"></select>
       <p class="form-hint" id="shareGroupsHint"></p>
       <p class="field-label">Events you picked</p>
       <div class="share-picked-list" id="sharePickedList"></div>
+      <p class="field-label">Private events</p>
+      <div class="share-picked-list" id="sharePrivateList"></div>
+      <p class="form-hint">Private events are hidden from everyone — not even shown as busy — so a group may suggest a time over one. Booking links still keep those times closed. Only a scrambled code of each name is saved, never the name.</p>
+      <p class="form-hint" id="shareSyncNote"></p>
       <button class="primary-button full" id="saveSharing" type="button">Save</button>
     </dialog>
 

@@ -6,6 +6,7 @@
 
 import { buildGuestIcs } from "./lib/booking.js";
 import { toIcsUtc } from "./lib/calendar-export.js";
+import { registerServiceWorker } from "./lib/pwa.js";
 
 const $ = (id) => document.getElementById(id);
 const pathHandle = decodeURIComponent(window.location.pathname.split("/")[2] || "");
@@ -220,3 +221,4 @@ async function loadCancel() {
 
 if (cancelToken) loadCancel();
 else loadSlots();
+registerServiceWorker();
