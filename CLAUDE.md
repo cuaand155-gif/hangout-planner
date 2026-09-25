@@ -8,6 +8,7 @@ Read this before changing anything that shows calendar events or sharing. These 
 |---|---|---|
 | **My availability** (week grid, "My availability" tab) | Only you | Plain busy/free blocks by default. The **"Show event details"** switch turns on your actual schedule: event name, place and time. The switch is remembered per device (`gatherly-mine-details`). |
 | **Group view** (week grid, "Group" tab) | Everyone in the group | Who's free, plus named event blocks: **event name · person · place**, but only for events that person has chosen to share and only when the group allows event details. Your own events always show to you. |
+| **Group calendar** (per-person week agenda) | Everyone in the group | One row per person. Same rule as the group view: other people's event names and places only when the group allows event details and they shared that event; otherwise "Busy". Your own row shows your events to you. |
 | **Your calendar** (agenda under the grid) | Only you | Every event name. Tap an event to pick it for sharing, or lock it as private. |
 | **A friend's calendar** (Friends → Calendar) | That friend | Exactly what your "Who sees what" level for them allows. |
 | **Booking link** (public page) | Anyone with the link | Only open times, never event names or places. Private events still block bookings. |
