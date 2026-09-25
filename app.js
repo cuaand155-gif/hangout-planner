@@ -153,6 +153,7 @@ const ui = {
   saving: false,
   user: null,
   myWeekOffset: 0,
+  groupCalOffset: 0,
   previewAs: "me",
   friendCalendar: null,
   workspaceLoaded: false,
@@ -514,6 +515,7 @@ function render() {
   renderPeople();
   renderIdeas();
   renderMyCalendar();
+  renderGroupCalendar();
   renderActivityBadge();
   renderChecklist();
 }
@@ -3226,6 +3228,72 @@ $("myThisWeek").addEventListener("click", () => {
 $("mycalPreview").addEventListener("change", (event) => {
   ui.previewAs = event.target.value;
   renderMyCalendar();
+});
+
+function groupCalWeek() {
+  const base = startOfWeek(addDays(new Date(), ui.groupCalOffset * 7), settings().weekStartsOn);
+  return buildWeek(base, { today: new Date() });
+}
+
+/** What one member is doing on a day. Your own row uses your full events
+ * (with names); everyone else shows only what they've shared with the group. */
+function memberDayEvents(member, date) {
+  const source = member.id === memberId ? allMyEvents() : member.busy || [];
+  return eventsOnDay(dedupeEvents(source), date);
+}
+
+function renderGroupCalendar() {
+  const grid = $("groupCalGrid");
+  if (!grid) return;
+  const week = groupCalWeek();
+  $("groupCalWeekLabel").textContent = formatWeekLabel(week[0].date, week.length);
+  $("groupCalThisWeek").hidden = ui.groupCalOffset === 0;
+
+  const dayHeads = week
+    .map((day) => `<div class="gc-dayhead${day.isToday ? " today" : ""}" role="columnheader"><small>${escapeHtml(day.label)}</small><strong>${day.dayOfMonth}</strong></div>`)
+    .join("");
+
+  const rows = session.state.members
+    .map((member) => {
+      const isYou = member.id === memberId;
+      const person = `<div class="gc-person${isYou ? " is-you" : ""}" role="rowheader"><div class="avatar ${member.palette}">${escapeHtml(member.initials)}</div><span class="gc-name">${escapeHtml(member.name)}${isYou ? " <em>(you)</em>" : ""}</span></div>`;
+      const cells = week
+        .map((day) => {
+          const today = day.isToday ? " today" : "";
+          if (member.pending) return `<div class="gc-cell${today}" role="gridcell"><span class="gc-muted">Not joined yet</span></div>`;
+          if (!isYou && member.sharesSchedule === false) {
+            return `<div class="gc-cell${today}" role="gridcell"><span class="gc-muted gc-private">${svgIcon("lock")} Private</span></div>`;
+          }
+          const events = memberDayEvents(member, day.date);
+          if (!events.length) return `<div class="gc-cell${today}" role="gridcell"><span class="gc-free">Free</span></div>`;
+          const items = events
+            .map((event) => {
+              const title = event.title || "Busy";
+              return `<div class="gc-event${event.title ? "" : " is-busy"}"><span class="gc-time">${escapeHtml(eventTimeLabel(event, day))}</span><strong>${escapeHtml(title)}</strong></div>`;
+            })
+            .join("");
+          return `<div class="gc-cell${today}" role="gridcell">${items}</div>`;
+        })
+        .join("");
+      return person + cells;
+    })
+    .join("");
+
+  grid.style.setProperty("--gc-days", week.length);
+  grid.innerHTML = `<div class="gc-corner" role="columnheader"></div>${dayHeads}${rows}`;
+}
+
+$("groupCalPrevWeek").addEventListener("click", () => {
+  ui.groupCalOffset -= 1;
+  renderGroupCalendar();
+});
+$("groupCalNextWeek").addEventListener("click", () => {
+  ui.groupCalOffset += 1;
+  renderGroupCalendar();
+});
+$("groupCalThisWeek").addEventListener("click", () => {
+  ui.groupCalOffset = 0;
+  renderGroupCalendar();
 });
 
 $("myAgenda").addEventListener("click", async (event) => {
