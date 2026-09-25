@@ -25,8 +25,9 @@ const MAX_RANGE_DAYS = 120;
 const accessCache = new Map(); // userId -> { token, expires }
 
 export function googleKeys() {
-  const id = process.env.GOOGLE_CLIENT_ID || "";
-  const secret = process.env.GOOGLE_CLIENT_SECRET || "";
+  // Trimmed: a value pasted with a trailing newline makes Google refuse every renewal (invalid_client).
+  const id = (process.env.GOOGLE_CLIENT_ID || "").trim();
+  const secret = (process.env.GOOGLE_CLIENT_SECRET || "").trim();
   return id && secret ? { id, secret } : null;
 }
 
@@ -71,21 +72,27 @@ async function forget(db, userId) {
   await rest(db, `google_tokens?${new URLSearchParams({ user_id: `eq.${userId}` })}`, { method: "DELETE" });
 }
 
+// Google's answers that mean this server's own OAuth client is wrong, not the
+// person's consent: reconnecting can't fix these, so the token is kept.
+const CLIENT_ERRORS = new Set(["invalid_client", "unauthorized_client"]);
+
 /**
- * A fresh access token, or null when there is no stored token or Google no
- * longer accepts it. `signal` bounds the lookups (a timeout, say).
+ * A fresh access token as { token }, or { token: null, reason } when there is
+ * no stored token ("none"), Google no longer accepts it ("revoked"), or this
+ * server's Google keys are wrong ("setup"). `signal` bounds the lookups.
  */
-async function accessToken(db, keys, userId, { signal } = {}) {
+async function refreshAccess(db, keys, userId, { signal } = {}) {
   const cached = accessCache.get(userId);
-  if (cached && cached.expires > Date.now()) return cached.token;
+  if (cached && cached.expires > Date.now()) return { token: cached.token };
   const sealed = await storedToken(db, userId, { signal });
-  if (!sealed) return null;
+  if (!sealed) return { token: null, reason: "none" };
   let refreshToken;
   try {
     refreshToken = openToken(sealed, keys.secret);
   } catch {
-    await forget(db, userId); // sealed with an older secret: unusable
-    return null;
+    console.warn("Google refresh token could not be opened (sealed with a different secret); forgetting it.");
+    await forget(db, userId);
+    return { token: null, reason: "revoked" };
   }
   const result = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -95,11 +102,20 @@ async function accessToken(db, keys, userId, { signal } = {}) {
   });
   const body = await result.json().catch(() => ({}));
   if (!result.ok || !body.access_token) {
-    if (body.error === "invalid_grant") await forget(db, userId); // revoked or expired: ask to reconnect
-    return null;
+    // Google's error code and description only: never the token or the keys.
+    console.warn("Google token refresh failed:", result.status, body.error || "", body.error_description || "");
+    if (body.error === "invalid_grant") {
+      await forget(db, userId); // revoked or expired: ask to reconnect
+      return { token: null, reason: "revoked" };
+    }
+    return { token: null, reason: CLIENT_ERRORS.has(body.error) ? "setup" : "unavailable" };
   }
   accessCache.set(userId, { token: body.access_token, expires: Date.now() + Math.max(60, (body.expires_in || 3600) - 120) * 1000 });
-  return body.access_token;
+  return { token: body.access_token };
+}
+
+async function accessToken(db, keys, userId, options) {
+  return (await refreshAccess(db, keys, userId, options)).token;
 }
 
 const FREE_BUSY_CHUNK_DAYS = 30;
@@ -208,14 +224,27 @@ async function handle(request, response) {
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from || to - from > MAX_RANGE_DAYS * 864e5) {
     return send(response, 400, { error: "Pick a range of up to four months." });
   }
-  const token = await accessToken(db, keys, userId);
-  if (!token) return send(response, 401, { error: "Connect Google Calendar again.", reconnect: true });
+  const { token, reason } = await refreshAccess(db, keys, userId);
+  if (!token) {
+    if (reason === "setup") return send(response, 503, { error: "Waddle's Google setup needs fixing; your connection is kept.", reason });
+    if (reason === "unavailable") return send(response, 502, { error: "Could not reach Google Calendar.", reason });
+    return send(response, 401, { error: "Connect Google Calendar again.", reconnect: true, reason });
+  }
 
   const params = new URLSearchParams({ timeMin: from.toISOString(), timeMax: to.toISOString(), singleEvents: "true", orderBy: "startTime", maxResults: "2500" });
   const result = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?${params}`, { headers: { Authorization: `Bearer ${token}` } });
   if (result.status === 401 || result.status === 403) {
     accessCache.delete(userId);
-    return send(response, 401, { error: "Google stopped sharing this calendar. Connect again.", reconnect: true });
+    const detail = await result.json().catch(() => ({}));
+    const why = detail?.error?.errors?.[0]?.reason || detail?.error?.status || "";
+    console.warn("Google Calendar refused a fresh access token:", result.status, why);
+    // Google's consent screen lets people untick calendar access; then the token works but can't read calendars.
+    const scope = /insufficient|scope|PERMISSION_DENIED/i.test(why);
+    return send(response, 401, {
+      error: scope ? "Google didn't grant calendar access. Connect again and tick \"See your calendars\"." : "Google stopped sharing this calendar. Connect again.",
+      reconnect: true,
+      reason: scope ? "scope" : "revoked",
+    });
   }
   if (!result.ok) return send(response, 502, { error: "Could not reach Google Calendar." });
   const payload = await result.json();
