@@ -320,6 +320,60 @@ describe("booking link owner", () => {
   });
 });
 
+describe("layout", () => {
+  const overlaps = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+
+  browserTest("event chips never show a half-cut line; member badges don't cover the status dot", { signedIn: true, groupEvents: true }, async ({ page, go }) => {
+    await go("/");
+    await page.locator(".event-chip").first().waitFor();
+    const chips = await page.$$eval(".event-chip", (list) => list.map((chip) => ({ text: chip.innerText, client: chip.clientHeight, scroll: chip.scrollHeight })));
+    assert.ok(chips.length >= 4);
+    for (const chip of chips) assert.ok(chip.scroll <= chip.client, `"${chip.text.replace(/\n/g, " | ")}" overflows (${chip.scroll} > ${chip.client})`);
+    const therapy = chips.find((chip) => chip.text.startsWith("Therapy"));
+    assert.equal(therapy.text.split("\n").length, 2, "a one-hour chip: title plus one meta line");
+
+    const you = page.locator(".person-card.is-you");
+    const badge = await you.locator(".person-badge").boundingBox();
+    const dot = await you.locator(".presence").boundingBox();
+    const box = (rect) => ({ left: rect.x, top: rect.y, right: rect.x + rect.width, bottom: rect.y + rect.height });
+    assert.ok(!overlaps(box(badge), box(dot)), "YOU badge and status dot are apart");
+  });
+
+  browserTest("a friend row has no dead space and its avatar lines up with the name block", { signedIn: true }, async ({ page, go }) => {
+    await go("/");
+    await page.locator("#managePeople").click();
+    await page.locator("#friendsTab").click();
+    const row = page.locator(".friend-row").first();
+    await row.waitFor();
+    const layout = await row.evaluate((element) => {
+      const text = element.querySelector(".avatar + div");
+      const last = text.lastElementChild.getBoundingClientRect();
+      const block = text.getBoundingClientRect();
+      const avatar = element.querySelector(".avatar").getBoundingClientRect();
+      return { gap: block.bottom - last.bottom, avatarMiddle: avatar.top + avatar.height / 2, top: block.top, bottom: block.bottom };
+    });
+    assert.ok(layout.gap <= 1, `${layout.gap}px empty under the text`);
+    assert.ok(layout.avatarMiddle > layout.top && layout.avatarMiddle < layout.bottom, "avatar sits beside the name block");
+  });
+
+  browserTest("phone: hero buttons line up with the text, and the menu has a backdrop that closes it", { phone: true }, async ({ page, go }) => {
+    await go("/");
+    const copy = await page.locator(".hero-copy").boundingBox();
+    const first = await page.locator("#tentativePlanButton").boundingBox();
+    assert.ok(Math.abs(first.x - copy.x) <= 1, `first button starts ${first.x - copy.x}px from the text`);
+    assert.equal(await page.locator("#menuBackdrop").isVisible(), false);
+    await page.locator("#mobileMenu").click();
+    await page.locator("#menuBackdrop").waitFor();
+    assert.equal(await page.locator("#mobileMenu").getAttribute("aria-expanded"), "true");
+    // Tap the dimmed page to the right of the drawer.
+    const viewport = page.viewportSize();
+    await page.mouse.click(viewport.width - 20, viewport.height / 2);
+    await page.waitForFunction(() => !document.querySelector("#sidebar").classList.contains("open"));
+    assert.equal(await page.locator("#menuBackdrop").isVisible(), false);
+    assert.equal(await page.locator("#mobileMenu").getAttribute("aria-expanded"), "false");
+  });
+});
+
 describe("smoke", () => {
   browserTest("phone viewport: the menu opens and nothing scrolls sideways", { phone: true }, async ({ page, go }) => {
     await go("/");

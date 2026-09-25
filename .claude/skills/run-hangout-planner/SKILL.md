@@ -84,12 +84,12 @@ Useful selectors:
 
 ```bash
 npm test          # node --test "test/*.test.mjs"; 223 passing, about 5 s
-npm run test:e2e  # node --test "test/e2e/*.e2e.mjs"; 13 browser tests, about 25 s
+npm run test:e2e  # node --test "test/e2e/*.e2e.mjs"; 16 browser tests, about 30 s
 ```
 
 `npm test` covers the API handlers with a faked `fetch` (PostgREST, Supabase auth, Google, Resend: nothing real is called and no email is ever sent), the pure logic in `lib/` (booking, sharing, hangout, ics, …), and the offline-shell list in `sw.js`. `test/book-services.test.mjs` covers the booking page's Google freeBusy check and the booking emails. Database policies are checked separately by `supabase/rls-shares-test.sql`, run in a rolled-back transaction against a real project.
 
-`npm run test:e2e` starts its own dev server on a free port (no need to start or stop one yourself), runs `test/e2e/app.e2e.mjs` in headless Chromium and stops the server. It covers the flows above: group view, plan → vote → pick → RSVP, painting My availability, Google connect via `?calendar=1` and disconnect, the `--google-server` sync, Who sees what, Free now, a public booking page (book and cancel, against a stubbed `/api/book`), the owner cancelling a booking, and phone and dark-theme smoke tests. Every test fails on page errors. Without Playwright (at `PLAYWRIGHT_PATH`, default `/opt/node22/lib/node_modules/playwright/index.mjs`) every test is skipped with a message. To add a flow, use `browserTest(name, { signedIn, googleServer, groupEvents, phone, theme }, async ({ page, context, go, google }) => …)` in that file; `openSession` in `session.mjs` takes the same options as the driver's flags.
+`npm run test:e2e` starts its own dev server on a free port (no need to start or stop one yourself), runs `test/e2e/app.e2e.mjs` in headless Chromium and stops the server. It covers the flows above: group view, plan → vote → pick → RSVP, painting My availability, Google connect via `?calendar=1` and disconnect, the `--google-server` sync, Who sees what, Free now, a public booking page (book and cancel, against a stubbed `/api/book`), the owner cancelling a booking, layout checks (event chips show only whole lines, the YOU badge clears the status dot, friend rows have no dead space, the phone hero row and menu backdrop), and phone and dark-theme smoke tests. Every test fails on page errors. Without Playwright (at `PLAYWRIGHT_PATH`, default `/opt/node22/lib/node_modules/playwright/index.mjs`) every test is skipped with a message. To add a flow, use `browserTest(name, { signedIn, googleServer, groupEvents, phone, theme }, async ({ page, context, go, google }) => …)` in that file; `openSession` in `session.mjs` takes the same options as the driver's flags.
 
 ## Gotchas
 

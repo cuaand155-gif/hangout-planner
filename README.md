@@ -31,8 +31,8 @@ flows and stops the server afterwards: the group view, proposing and voting on
 a plan and RSVPing, painting My availability, connecting and disconnecting
 Google Calendar (browser token and server sync), making an event private in
 Who sees what, the Free now strip, booking and cancelling on a public booking
-page, cancelling as the owner, and phone and dark-theme smoke tests. Any page
-error fails the test.
+page, cancelling as the owner, a few layout checks, and phone and dark-theme
+smoke tests. Any page error fails the test.
 
 It adds no dependency: it uses Playwright from `PLAYWRIGHT_PATH`
 (default `/opt/node22/lib/node_modules/playwright/index.mjs`) or an installed
