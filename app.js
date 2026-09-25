@@ -2524,7 +2524,7 @@ function renderFriends(errorMessage) {
               ? `<button type="button" data-add-friend="${escapeAttribute(row.id)}">Link to them</button>`
               : `<button type="button" data-add-friend="${escapeAttribute(row.id)}">Add to group</button>`;
           const calendar = party.id
-            ? `<button type="button" class="quiet" data-view-calendar="${escapeAttribute(party.id)}" data-friend-name="${escapeAttribute(party.name)}">Calendar</button>`
+            ? `<button type="button" data-view-calendar="${escapeAttribute(party.id)}" data-friend-name="${escapeAttribute(party.name)}">Calendar</button>`
             : "";
           return friendRowMarkup(row, calendar + action, { withStatus: true });
         })
