@@ -1,7 +1,7 @@
 // Reads a published calendar feed and returns busy blocks.
 //
 //   POST /api/calendar  { url, from, to, details? }
-//     -> { blocks: [{ start, end, allDay, title? }], count, truncated }
+//     -> { blocks: [{ start, end, allDay, title?, location? }], count, truncated }
 //
 // The browser cannot fetch most calendar feeds directly (no CORS headers), so
 // this runs server side. That means it fetches a URL supplied by a visitor,

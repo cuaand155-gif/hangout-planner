@@ -198,3 +198,12 @@ test("escaped text is unescaped and an empty calendar yields nothing", () => {
 test("an invalid window is rejected", () => {
   assert.throws(() => parseIcs(calendar(), { from: "nope", to: "also nope" }), /Invalid window/);
 });
+
+test("LOCATION comes through only when titles are asked for", async () => {
+  const { parseIcs } = await import("../lib/ics.js");
+  const ics = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:loc-1\r\nDTSTART:20260926T160000Z\r\nDTEND:20260926T170000Z\r\nSUMMARY:Dinner\r\nLOCATION:Luma\\, King St\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+  const range = { from: "2026-09-25T00:00:00Z", to: "2026-09-28T00:00:00Z" };
+  const named = parseIcs(ics, { ...range, includeTitles: true });
+  assert.equal(named[0].location, "Luma, King St");
+  assert.equal(parseIcs(ics, range)[0].location, undefined);
+});

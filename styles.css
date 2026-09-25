@@ -518,9 +518,15 @@ body.gated .app-shell>:not(.signin-gate){visibility:hidden}
 .event-chip{position:absolute;z-index:1;pointer-events:none;overflow:hidden;border-radius:7px;padding:3px 6px;background:var(--surface);border-left:3px solid var(--purple);box-shadow:0 1px 3px color-mix(in srgb,var(--ink) 14%,transparent);font-size:10px;line-height:1.25;color:var(--ink)}
 .event-chip strong{display:block;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .event-chip small{display:block;color:var(--muted);font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.event-chip.ghost{background:color-mix(in srgb,var(--surface) 72%,transparent);box-shadow:none;border:1px dashed color-mix(in srgb,var(--ink) 35%,transparent);border-left:3px solid var(--ink)}
+.event-chip.mine{border-left-color:var(--ink)}
 .event-chip.private{border-left-color:var(--muted);color:var(--muted)}
 .event-chip.private strong{text-decoration:line-through}
 .event-chip .icon{width:10px;height:10px;float:right;margin:1px 0 0 3px}
 .plan-when{margin:0 0 4px;padding:10px 12px;border-radius:10px;background:var(--lavender);color:var(--purple-dark);font-size:12px;font-weight:700}
 .plan-when:before{content:"When: ";font-weight:600;opacity:.8}
+/* One "you're busy" colour for hand-marked hours, calendar blocks and the legend. */
+:root{--mine-busy:color-mix(in srgb,var(--ink) 68%,var(--surface))}
+:root[data-theme="dark"]{--mine-busy:color-mix(in srgb,var(--muted) 70%,var(--surface))}
+.busy-block{position:absolute;z-index:1;pointer-events:none;border-radius:6px;background:var(--mine-busy)}
+.calendar-grid.editing .slot.mine-busy{background:var(--mine-busy)}
+#mineLegend .legend-dot.busy{background:var(--mine-busy)}

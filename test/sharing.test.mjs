@@ -104,9 +104,16 @@ test("some shows only the picked names", () => {
   );
 });
 
-test("all shows every name and nothing beyond start, end, all-day and title", () => {
+test("all shows every name and its place, and nothing beyond (no notes)", () => {
   const shared = eventsForLevel([{ ...EVENTS[0], location: "Field 3", notes: "bring cleats" }], "all", defaultSharing());
-  assert.deepEqual(shared, [{ start: "2026-09-24T13:00:00.000Z", end: "2026-09-24T14:00:00.000Z", title: "Soccer" }]);
+  assert.deepEqual(shared, [{ start: "2026-09-24T13:00:00.000Z", end: "2026-09-24T14:00:00.000Z", title: "Soccer", location: "Field 3" }]);
+});
+
+test("a place only travels with a name: busy-only drops both", () => {
+  const busy = eventsForLevel([{ ...EVENTS[0], location: "Field 3" }], "busy", defaultSharing());
+  assert.deepEqual(busy, [{ start: "2026-09-24T13:00:00.000Z", end: "2026-09-24T14:00:00.000Z" }]);
+  const cleaned = cleanSharedEvents([{ start: "2026-09-24T13:00:00Z", end: "2026-09-24T14:00:00Z", location: "Home" }]);
+  assert.equal(cleaned[0].location, undefined, "a location without a name is dropped");
 });
 
 test("cleanSharedEvents rejects malformed entries from a friend's share", () => {

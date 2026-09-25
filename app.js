@@ -1,4 +1,5 @@
 import {
+  busyBlocksFor,
   AVATAR_PALETTES,
   IDEA_STYLES,
   addDays,
@@ -673,14 +674,37 @@ phoneQuery.addEventListener("change", () => renderGrid());
 }
 
 /**
- * Your own events, drawn by name on top of the week (only you see these).
- * In "My availability" they're solid; on the group view they're outlines,
- * so the free/busy colours underneath still read.
+ * Named events on the group view: everything people let this group see (name
+ * and place), plus your own events, which only you see by name. "My
+ * availability" stays plain busy/free blocks.
  */
+function groupEventsOn(day) {
+  const entries = [];
+  const mine = me();
+  for (const event of eventsOnDay(allMyEvents(), day.date)) {
+    if (event.allDay) continue;
+    entries.push({ start: +new Date(event.start), end: +new Date(event.end), title: event.title || "Busy", location: event.location || "", who: "You", mine: true, hidden: isHidden(hiddenKeys, event.title) });
+  }
+  for (const member of session.state.members) {
+    if (member.id === mine?.id) continue;
+    for (const block of busyBlocksFor(member, day.date) || []) {
+      if (!block.title) continue; // busy-only: the colours already say it
+      entries.push({ start: block.start, end: block.end, title: block.title, location: block.location || "", who: member.name.split(" ")[0] });
+    }
+  }
+  return entries;
+}
+
+/** "My availability": your calendar's events as plain busy blocks, no names. */
+function mineBlocksOn(day) {
+  return eventsOnDay(allMyEvents(), day.date)
+    .filter((event) => !event.allDay)
+    .map((event) => ({ start: +new Date(event.start), end: +new Date(event.end), block: true }));
+}
+
 function renderEventLayer(days, slots, isMineView) {
   const grid = $("calendarGrid");
-  const events = allMyEvents().filter((event) => !event.allDay);
-  if (!events.length || !slots.length) return;
+  if (!slots.length) return;
   const first = slots[0].hour;
   const last = slots[slots.length - 1].hour + 1;
   const chips = [];
@@ -693,8 +717,8 @@ function renderEventLayer(days, slots, isMineView) {
     from.setHours(first, 0, 0, 0);
     const to = new Date(day.date);
     to.setHours(last, 0, 0, 0);
-    const today = eventsOnDay(events, day.date)
-      .map((event) => ({ event, start: Math.max(+new Date(event.start), +from), end: Math.min(+new Date(event.end), +to) }))
+    const today = (isMineView ? mineBlocksOn(day) : groupEventsOn(day))
+      .map((entry) => ({ ...entry, from: entry.start, start: Math.max(entry.start, +from), end: Math.min(entry.end, +to) }))
       .filter((entry) => entry.end > entry.start)
       .sort((a, b) => a.start - b.start || b.end - a.end);
     // Side-by-side lanes for events that overlap.
@@ -708,14 +732,19 @@ function renderEventLayer(days, slots, isMineView) {
       const overlapping = today.filter((other) => other.start < entry.end && other.end > entry.start);
       const laneCount = Math.max(...overlapping.map((other) => other.lane)) + 1;
       const width = (top.offsetWidth - 6) / laneCount;
-      const hidden = isHidden(hiddenKeys, entry.event.title);
-      const title = entry.event.title || "Busy";
-      const time = `${formatClock(new Date(entry.event.start))} – ${formatClock(new Date(entry.event.end))}`;
+      const time = `${formatClock(new Date(entry.from))} – ${formatClock(new Date(entry.end))}`;
+      const place = `top:${top.offsetTop + ((entry.start - from) / 3600000) * hourPx + 1}px;height:${Math.max(isMineView ? 8 : 20, ((entry.end - entry.start) / 3600000) * hourPx - 2)}px;` +
+        `left:${top.offsetLeft + 3 + entry.lane * width}px;width:${width - 2}px`;
+      if (entry.block) {
+        chips.push(`<div class="busy-block" aria-hidden="true" title="Busy · ${escapeAttribute(time)}" style="${place}"></div>`);
+        continue;
+      }
+      const detail = [entry.who, entry.location].filter(Boolean).join(" · ");
       chips.push(
-        `<div class="event-chip${isMineView ? "" : " ghost"}${hidden ? " private" : ""}" aria-hidden="true" title="${escapeAttribute(`${title} · ${time}${hidden ? " · private" : ""}`)}"` +
-          ` style="top:${top.offsetTop + ((entry.start - from) / 3600000) * hourPx + 1}px;height:${Math.max(18, ((entry.end - entry.start) / 3600000) * hourPx - 2)}px;` +
-          `left:${top.offsetLeft + 3 + entry.lane * width}px;width:${width - 2}px">` +
-          `${hidden ? svgIcon("lock") : ""}<strong>${escapeHtml(title)}</strong><small>${escapeHtml(time)}</small></div>`
+        `<div class="event-chip${entry.mine ? " mine" : ""}${entry.hidden ? " private" : ""}" aria-hidden="true" title="${escapeAttribute([entry.title, detail, time].filter(Boolean).join(" · "))}"` +
+          ` style="${place}">` +
+          `${entry.hidden ? svgIcon("lock") : ""}<strong>${escapeHtml(entry.title)}</strong><small>${escapeHtml(detail)}</small>` +
+          `${entry.location ? "" : `<small>${escapeHtml(time)}</small>`}</div>`
       );
     }
   }
@@ -1315,6 +1344,7 @@ async function storeImportedBlocks(events, sourceKey, range, { quiet = false } =
       end: new Date(event.end),
       ...(event.allDay ? { allDay: true } : {}),
       ...(event.title ? { title: String(event.title).slice(0, 120) } : {}),
+      ...(event.location ? { location: String(event.location).slice(0, 120) } : {}),
     }))
     .filter((event) => !Number.isNaN(event.start.getTime()) && !Number.isNaN(event.end.getTime()) && event.end > event.start);
 
@@ -1344,7 +1374,7 @@ async function publishKindToGroup(kind, range, { quiet = false } = {}) {
     .map((event) => ({
       start: new Date(event.start),
       end: new Date(event.end),
-      ...(groupSeesTitle(event.title) ? { title: event.title } : {}),
+      ...(groupSeesTitle(event.title) ? { title: event.title, ...(event.location ? { location: event.location } : {}) } : {}),
     }));
 
   const mine = me();
@@ -1403,7 +1433,7 @@ async function importIcs(url, { silent = false, quiet = false } = {}) {
 }
 
 async function syncGoogle({ silent = false, quiet = false } = {}) {
-  const token = window.sessionStorage.getItem(STORAGE.googleToken);
+  const token = googleToken();
   if (!token) {
     if (!silent) showToast("Connect Google Calendar first.");
     return null;
@@ -1422,9 +1452,9 @@ async function syncGoogle({ silent = false, quiet = false } = {}) {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (response.status === 401 || response.status === 403) {
-      window.sessionStorage.removeItem(STORAGE.googleToken);
+      clearGoogleToken();
       renderGoogleState();
-      if (!silent) showToast("Google access expired — connect again to refresh busy times.");
+      if (!silent) showToast("Google calendar access ran out (Google allows about an hour). Tap Connect again, or add your secret iCal address for nonstop syncing.");
       return null;
     }
     if (!response.ok) throw new Error(String(response.status));
@@ -1440,6 +1470,7 @@ async function syncGoogle({ silent = false, quiet = false } = {}) {
       start: item.start?.dateTime || (item.start?.date ? `${item.start.date}T00:00:00` : null),
       end: item.end?.dateTime || (item.end?.date ? `${item.end.date}T00:00:00` : null),
       title: item.summary,
+      location: item.location,
       allDay: Boolean(item.start?.date && !item.start?.dateTime),
     }))
     .filter((block) => block.start && block.end);
@@ -1457,12 +1488,12 @@ async function syncGoogle({ silent = false, quiet = false } = {}) {
 }
 
 function renderGoogleState() {
-  const connected = Boolean(window.sessionStorage.getItem(STORAGE.googleToken));
+  const connected = Boolean(googleToken());
   const button = $("googleCalendarButton");
   button.textContent = connected ? "Synced" : "Connect";
   button.classList.toggle("connected", connected);
   $("googleCalendarState").textContent = connected
-    ? "Connected for this browser session — refreshes by itself while you're signed in. For hands-free syncing, add your secret iCal address below too."
+    ? "Connected. Google only allows about an hour at a time, then you'll be asked to connect again. For syncing that never stops, add your calendar's secret iCal address below."
     : "Sync busy times and show schedule overlaps.";
 }
 
@@ -1490,7 +1521,7 @@ async function autoSyncCalendars() {
       changed = changed || importIcs.lastChanged;
     }
     const google = calendarSources.find((entry) => entry.type === "google");
-    if (window.sessionStorage.getItem(STORAGE.googleToken) && dueForSync(google?.syncedAt)) {
+    if (googleToken() && dueForSync(google?.syncedAt)) {
       const count = await syncGoogle({ silent: true, quiet: true });
       if (count !== null) changed = changed || syncGoogle.lastChanged;
     }
@@ -1944,7 +1975,7 @@ $("calendarButton").addEventListener("click", () => {
 });
 
 $("googleCalendarButton").addEventListener("click", async () => {
-  if (window.sessionStorage.getItem(STORAGE.googleToken)) {
+  if (googleToken()) {
     await syncGoogle();
     renderGoogleState();
     return;
@@ -1956,7 +1987,8 @@ $("googleCalendarButton").addEventListener("click", async () => {
   const { error } = await supabaseClient.auth.signInWithOAuth({
     provider: "google",
     options: {
-      redirectTo: `${AUTH_CONFIG.redirectUrl}${session.slug === "weekend-crew" ? "" : `?w=${encodeURIComponent(session.slug)}`}`,
+      // ?calendar tells the page it's back from the consent screen, so it keeps the token and syncs.
+      redirectTo: `${AUTH_CONFIG.redirectUrl}?calendar=1${session.slug === "weekend-crew" ? "" : `&w=${encodeURIComponent(session.slug)}`}`,
       scopes: GOOGLE_SCOPE,
       queryParams: { access_type: "offline", prompt: "consent" },
     },
@@ -2012,7 +2044,7 @@ $("calendarSources").addEventListener("click", (event) => {
 
 $("syncCalendarButton").addEventListener("click", async () => {
   const icsSources = calendarSources.filter((source) => source.type === "ics");
-  const hasGoogle = Boolean(window.sessionStorage.getItem(STORAGE.googleToken));
+  const hasGoogle = Boolean(googleToken());
   if (!icsSources.length && !hasGoogle) {
     renderSources();
     renderGoogleState();
@@ -2166,7 +2198,7 @@ $("gateSignIn").addEventListener("click", () => $("googleSignInButton").click())
 $("signOutButton").addEventListener("click", async () => {
   if (!supabaseClient) return;
   await supabaseClient.auth.signOut();
-  window.sessionStorage.removeItem(STORAGE.googleToken);
+  clearGoogleToken();
   renderGoogleState();
   showToast("Signed out on this device.");
 });
@@ -2969,7 +3001,7 @@ $("resetLocal").addEventListener("click", () => {
   for (const key of [STORAGE.cache(session.slug), STORAGE.member, STORAGE.profile, STORAGE.sources, STORAGE.seen(session.slug)]) {
     window.localStorage.removeItem(key);
   }
-  window.sessionStorage.removeItem(STORAGE.googleToken);
+  clearGoogleToken();
   showToast("This device is reset. Reloading…");
   window.setTimeout(() => window.location.reload(), 900);
 });
@@ -3603,23 +3635,55 @@ async function start() {
 
   // Coming back from the Google consent screen: pull busy times straight away.
   if (new URLSearchParams(window.location.search).has("calendar")) {
-    await syncGoogle();
+    const { data } = supabaseClient ? await supabaseClient.auth.getSession() : { data: null };
+    captureProviderToken(data?.session);
+    if (googleToken()) await syncGoogle();
+    else showToast("Google didn't grant calendar access. Try Connect again, or add your calendar's secret iCal address instead.");
     renderGoogleState();
+    // Drop the marker so a reload doesn't re-run this.
+    const url = new URL(window.location.href);
+    url.searchParams.delete("calendar");
+    window.history.replaceState(null, "", url);
   }
 }
 
 /**
- * Supabase hands over the Google access token once, on the OAuth callback.
- * Keeping it in sessionStorage means a refresh does not silently stop syncing;
- * it is deliberately not written to localStorage or to the shared workspace.
+ * Google's calendar access token (handed over once, on the OAuth callback;
+ * never written to the shared workspace). It lasts about an hour and can't be renewed
+ * without a server-side client secret, so it's kept (with its expiry) across
+ * tabs and reloads until then, and the app asks to reconnect after.
  */
+function googleToken() {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(STORAGE.googleToken) || "null");
+    if (saved?.token && saved.expires > Date.now()) return saved.token;
+  } catch {
+    /* Old plain-string value or blocked storage: treat as not connected. */
+  }
+  return null;
+}
+
+function setGoogleToken(token) {
+  try {
+    window.localStorage.setItem(STORAGE.googleToken, JSON.stringify({ token, expires: Date.now() + 55 * 60 * 1000 }));
+  } catch {
+    /* Storage blocked: syncing still works on this page. */
+  }
+}
+
+function clearGoogleToken() {
+  try {
+    window.localStorage.removeItem(STORAGE.googleToken);
+    clearGoogleToken();
+  } catch {
+    /* Nothing stored. */
+  }
+}
+
+/** Only the "Connect Google Calendar" round trip carries calendar access; a plain sign-in's token can't read calendars. */
 function captureProviderToken(authSession) {
-  if (authSession?.provider_token) {
-    try {
-      window.sessionStorage.setItem(STORAGE.googleToken, authSession.provider_token);
-    } catch {
-      /* Session storage unavailable: syncing still works until reload. */
-    }
+  if (authSession?.provider_token && new URLSearchParams(window.location.search).has("calendar")) {
+    setGoogleToken(authSession.provider_token);
     if (!calendarSources.some((source) => source.type === "google")) {
       calendarSources.push({ type: "google", label: "Google Calendar", url: "google" });
       saveSources();
