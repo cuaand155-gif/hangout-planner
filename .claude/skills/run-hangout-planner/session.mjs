@@ -13,7 +13,8 @@
 // --signed-in / signedIn swaps supabase-js for fake-supabase.js (an in-memory
 // database with you, a friend "Sam Rivera" and his "free now" status) and
 // seeds two of your own calendar events, so friend and sharing features can be
-// driven.
+// driven. With it, `as` ("alexi", "sam" or "jordan") picks who is signed in and
+// `seed` ({ table: rows }) starts the fake database with those rows.
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -83,10 +84,12 @@ async function routeGoogleServer(context) {
   return google;
 }
 
-function seedStorage({ theme, signedIn, groupEvents }) {
+function seedStorage({ theme, signedIn, groupEvents, as, seed }) {
   if (sessionStorage.getItem("driver-seeded")) return;
   sessionStorage.setItem("driver-seeded", "1");
   localStorage.setItem("gatherly-appearance", theme);
+  if (as) localStorage.setItem("fake-user", as);
+  if (seed) localStorage.setItem("fake-seed", JSON.stringify(seed));
   if (groupEvents) {
     // Demo mode keeps a cached group, so seed one whose members share named events.
     const day = (offset, hour) => {
@@ -132,7 +135,7 @@ function seedStorage({ theme, signedIn, groupEvents }) {
  * to reuse one (close() then only closes the context), and `blockServiceWorkers`
  * to keep sw.js from caching between loads.
  */
-export async function openSession({ playwright, browser: shared = null, signedIn = false, groupEvents = false, googleServer = false, theme = "light", phone = false, blockServiceWorkers = false } = {}) {
+export async function openSession({ playwright, browser: shared = null, signedIn = false, groupEvents = false, googleServer = false, theme = "light", phone = false, blockServiceWorkers = false, as = null, seed = null } = {}) {
   const { chromium, devices } = playwright || (await loadPlaywright()) || {};
   if (!chromium) throw new Error(`Playwright not found (looked for ${PLAYWRIGHT_PATH} and the "playwright" package).`);
   const browser = shared || (await chromium.launch());
@@ -154,7 +157,7 @@ export async function openSession({ playwright, browser: shared = null, signedIn
     await routeGoogleEvents(context);
   }
   const google = googleServer ? await routeGoogleServer(context) : null;
-  await context.addInitScript(seedStorage, { theme, signedIn, groupEvents });
+  await context.addInitScript(seedStorage, { theme, signedIn, groupEvents, as, seed });
   const close = () => (shared ? context.close() : browser.close());
   return { browser, context, page, errors, google, close };
 }

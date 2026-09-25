@@ -182,6 +182,16 @@ test("replaceBusyRange swaps one source in place and leaves others alone", () =>
   assert.deepEqual(second, first, "re-syncing the same range does not duplicate blocks");
 });
 
+test("replaceBusyRange keeps a shared event's place, but never a place without its name", () => {
+  const range = { source: "ics", from: "2026-09-21T00:00:00.000Z", to: "2026-09-22T00:00:00.000Z" };
+  const [unnamed, named] = replaceBusyRange([], [
+    { start: "2026-09-21T18:00:00.000Z", end: "2026-09-21T20:00:00.000Z", title: "Soccer", location: "Riverdale Park" },
+    { start: "2026-09-21T09:00:00.000Z", end: "2026-09-21T10:00:00.000Z", location: "Clinic on Bloor" },
+  ], range);
+  assert.deepEqual(named, { start: "2026-09-21T18:00:00.000Z", end: "2026-09-21T20:00:00.000Z", title: "Soccer", location: "Riverdale Park", source: "ics" });
+  assert.deepEqual(unnamed, { start: "2026-09-21T09:00:00.000Z", end: "2026-09-21T10:00:00.000Z", source: "ics" });
+});
+
 test("widenCoverage only ever grows the covered range", () => {
   const first = widenCoverage(null, local(2026, 9, 21), local(2026, 9, 27));
   assert.deepEqual(first, { from: "2026-09-21", to: "2026-09-27" });

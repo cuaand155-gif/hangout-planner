@@ -587,44 +587,6 @@ function renderStatus() {
 
 function renderGrid() {
   const grid = $("calendarGrid");
-
-function showDay(index) {
-  const week = currentWeek();
-  ui.dayIndex = Math.min(Math.max(index, 0), week.length - 1);
-  renderGrid();
-}
-
-$("dayStrip").addEventListener("click", (event) => {
-  const pill = event.target.closest("[data-day-index]");
-  if (pill) showDay(Number(pill.dataset.dayIndex));
-});
-
-$("bestTimes").addEventListener("click", (event) => {
-  const card = event.target.closest("[data-window]");
-  if (!card) return;
-  const week = currentWeek();
-  const window = windowsForWeek(week).find((entry) => entry.start.getTime() === Number(card.dataset.window));
-  if (!window) return;
-  ui.selectedWindow = window.start.getTime();
-  ui.dayIndex = week.findIndex((day) => day.iso === window.day.iso);
-  renderGrid();
-  $("selectedWindow").scrollIntoView({ behavior: "smooth", block: "nearest" });
-});
-
-// Swipe between days on phones (group view only; "My availability" uses drag to paint).
-let swipe = null;
-grid.addEventListener("pointerdown", (event) => {
-  swipe = phoneQuery.matches && ui.view !== "mine" ? { x: event.clientX, y: event.clientY } : null;
-});
-grid.addEventListener("pointerup", (event) => {
-  if (!swipe) return;
-  const dx = event.clientX - swipe.x;
-  const dy = event.clientY - swipe.y;
-  swipe = null;
-  if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) showDay(dayIndexFor(currentWeek()) + (dx < 0 ? 1 : -1));
-});
-
-phoneQuery.addEventListener("change", () => renderGrid());
   const week = currentWeek();
   const slots = currentSlots();
   const mine = me();
@@ -677,6 +639,46 @@ phoneQuery.addEventListener("change", () => renderGrid());
   renderBestTimes(week);
   renderSelectedWindow(week);
 }
+
+/* Day picker, best-time cards and swipes (phones). Wired once, not on every redraw. */
+
+function showDay(index) {
+  const week = currentWeek();
+  ui.dayIndex = Math.min(Math.max(index, 0), week.length - 1);
+  renderGrid();
+}
+
+$("dayStrip").addEventListener("click", (event) => {
+  const pill = event.target.closest("[data-day-index]");
+  if (pill) showDay(Number(pill.dataset.dayIndex));
+});
+
+$("bestTimes").addEventListener("click", (event) => {
+  const card = event.target.closest("[data-window]");
+  if (!card) return;
+  const week = currentWeek();
+  const window = windowsForWeek(week).find((entry) => entry.start.getTime() === Number(card.dataset.window));
+  if (!window) return;
+  ui.selectedWindow = window.start.getTime();
+  ui.dayIndex = week.findIndex((day) => day.iso === window.day.iso);
+  renderGrid();
+  $("selectedWindow").scrollIntoView({ behavior: "smooth", block: "nearest" });
+});
+
+// Swipe between days on phones (group view only; "My availability" uses drag to paint).
+let swipe = null;
+$("calendarGrid").addEventListener("pointerdown", (event) => {
+  swipe = phoneQuery.matches && ui.view !== "mine" ? { x: event.clientX, y: event.clientY } : null;
+});
+$("calendarGrid").addEventListener("pointerup", (event) => {
+  if (!swipe) return;
+  const dx = event.clientX - swipe.x;
+  const dy = event.clientY - swipe.y;
+  swipe = null;
+  if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) showDay(dayIndexFor(currentWeek()) + (dx < 0 ? 1 : -1));
+});
+
+phoneQuery.addEventListener("change", () => renderGrid());
 
 /**
  * Named events on the group view: everything people let this group see (name
@@ -3085,7 +3087,8 @@ $("exportWorkspace").addEventListener("click", () => {
 });
 
 $("resetLocal").addEventListener("click", () => {
-  for (const key of [STORAGE.cache(session.slug), STORAGE.member, STORAGE.profile, STORAGE.sources, STORAGE.seen(session.slug)]) {
+  // The calendar links go, and so do the events imported from them (names included).
+  for (const key of [STORAGE.cache(session.slug), STORAGE.member, STORAGE.profile, STORAGE.sources, STORAGE.myEvents, STORAGE.seen(session.slug)]) {
     window.localStorage.removeItem(key);
   }
   clearGoogleToken();
