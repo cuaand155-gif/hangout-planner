@@ -25,7 +25,7 @@ Without `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` the server runs in demo mod
 ## Run (agent path): the driver
 
 ```bash
-node .claude/skills/run-hangout-planner/driver.mjs [--signed-in] [--phone] [--theme dark] <<'EOF'
+node .claude/skills/run-hangout-planner/driver.mjs [--signed-in] [--group-events] [--google-server] [--phone] [--theme dark] <<'EOF'
 nav /?nosw
 click [data-plan-idea]
 select #planRepeat weekly
@@ -59,6 +59,7 @@ Each line prints `ok  <command>` or `ERR <command>` followed by the reason. Scre
 - `--phone` gives an iPhone 13 viewport, where the sidebar moves behind `#mobileMenu`.
 - `--theme dark` switches to the dark theme.
 - `--signed-in` replaces supabase-js with `fake-supabase.js` (see below). It also answers Google Calendar's events API with two events tomorrow: `nav /?calendar=1` runs the "back from Connect Google Calendar" path (keeps the token, syncs).
+- `--google-server` answers `/api/google` as if `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` were set and a refresh token stored: the app syncs one event ("Server-synced brunch", two days out) with no browser token, and the Calendar links copy says it keeps syncing on its own. Without the flag the dev server answers `{configured:false}`, so the hourly browser-token flow is what you see.
 - `--group-events` seeds the demo group so Jamie and Taylor share named events with places, and the group allows event details. The group view then shows name · person · place blocks.
 
 **`--signed-in` in detail.** The fake is an in-memory database with you ("Alexi"), an accepted friend "Sam Rivera" who has "free now" turned on, and shares from Sam.
@@ -81,7 +82,7 @@ Useful selectors:
 ## Test
 
 ```bash
-npm test     # node --test "test/*.test.mjs"; 194 passing
+npm test     # node --test "test/*.test.mjs"; 206 passing
 ```
 
 Tests cover the API handlers with a fake PostgREST, the pure logic in `lib/` (booking, sharing, hangout, ics, …), and the offline-shell list in `sw.js`. Database policies are checked separately by `supabase/rls-shares-test.sql`, run in a rolled-back transaction against a real project.

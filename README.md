@@ -151,8 +151,11 @@ change stays in local storage and the header reads `OFFLINE`.
   paste it into **Calendar links**. The server fetches and parses it, and
   returns busy blocks for the next four weeks.
 - **Google Calendar**: connect it under **Calendar links**. This uses Supabase
-  Auth to request read-only calendar access and then reads your primary
-  calendar directly from the browser.
+  Auth to request read-only calendar access and reads your primary calendar.
+  When the server has `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`, it keeps
+  Google's refresh token (encrypted) so syncing continues past the hour and on
+  every device you sign in on; without them the browser reads it directly for
+  about an hour.
 
 Friend requests need the `friend_requests` table from `supabase/schema.sql`;
 everything else works without it.
@@ -166,12 +169,11 @@ See [DEPLOY.md](DEPLOY.md) for hosting, database and Google sign-in setup.
 - Friends see events from your connected calendars. Times you paint by hand
   stay inside that group.
 
-- Google Calendar's direct connection lasts about an hour after signing in,
-  because Supabase hands over Google's token only once. For hands-free syncing
-  use the calendar's secret iCal address instead, which refreshes indefinitely.
+- Without the Google client env vars, Google Calendar's direct connection
+  lasts about an hour, because Supabase hands over Google's token only once.
+  Add them (see DEPLOY.md) or use the calendar's secret iCal address.
 - Refreshing happens while Waddle is open. Nothing syncs in the background
-  while it's closed — that would mean the server holding everyone's calendar
-  access long-term.
+  while it's closed.
 - Calendar entries are converted from the timezone they were written in,
   including Outlook's Windows zone names. Entries with no timezone at all
   ("floating" times) and zones the server doesn't recognise are read in the

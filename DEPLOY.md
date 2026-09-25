@@ -97,9 +97,22 @@ Add the Calendar scope `https://www.googleapis.com/auth/calendar.readonly` to
 the same Google OAuth client. Waddle requests it only when somebody clicks
 **Connect** under Calendar links, and only ever reads.
 
-Supabase returns the Google access token once, on the sign-in callback, so the
-connection lasts for that browser session. Waddle keeps that token in
-`sessionStorage` — never in local storage, and never in the shared workspace.
+Supabase returns Google's tokens once, on the sign-in callback. On its own the
+browser's access token lasts about an hour, then people are asked to connect
+again. To keep syncing going:
+
+1. Run the `google_tokens` part of `supabase/schema.sql` (only the service role
+   can read that table).
+2. In Vercel → Settings → Environment Variables add `GOOGLE_CLIENT_ID` and
+   `GOOGLE_CLIENT_SECRET`: the same values you gave Supabase's Google provider.
+   Redeploy.
+
+After that, **Connect** hands Google's refresh token to `api/google.js`, which
+stores it encrypted (AES-256-GCM, key derived from the client secret) and uses
+it to fetch events. Only title, place and times leave the server. Removing the
+Google calendar in the app deletes the stored token; so does Google revoking
+access. Changing the client secret makes stored tokens unreadable, so everyone
+connects once more.
 
 ICS links (iCloud, Outlook, Google's secret address) need no setup at all.
 `api/calendar.js` fetches them server-side because calendar feeds do not allow

@@ -72,7 +72,7 @@
       return {
         auth: {
           // Coming back from "Connect Google Calendar" (?calendar) carries a Google token, like the real callback.
-          async getSession() { return { data: { session: { user, access_token: "fake-token", ...(location.search.includes("calendar") ? { provider_token: "fake-google-token" } : {}) } } }; },
+          async getSession() { return { data: { session: { user, access_token: "fake-token", ...(location.search.includes("calendar") ? { provider_token: "fake-google-token", provider_refresh_token: "fake-google-refresh" } : {}) } } }; },
           onAuthStateChange() { return { data: { subscription: { unsubscribe() {} } } }; },
           async signInWithOAuth() { return { error: null }; },
           async signOut() { return { error: null }; },

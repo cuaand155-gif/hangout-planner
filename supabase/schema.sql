@@ -502,3 +502,14 @@ create policy "Owners cancel their bookings"
 revoke insert, update, delete on public.bookings from authenticated, anon;
 grant update (status, cancelled_at) on public.bookings to authenticated;
 revoke all on public.booking_pages, public.bookings from anon;
+
+-- Google Calendar refresh tokens, sealed by api/google.js (AES-256-GCM).
+-- Only the service role reads or writes them: RLS on, no policies.
+create table if not exists public.google_tokens (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  refresh_token text not null check (char_length(refresh_token) < 4096),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.google_tokens enable row level security;
+revoke all on public.google_tokens from anon, authenticated;

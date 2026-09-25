@@ -1,6 +1,9 @@
 // Drives Waddle in headless Chromium. Reads one command per line from stdin.
 //
-//   node .claude/skills/run-hangout-planner/driver.mjs [--signed-in] [--group-events] [--theme dark] [--phone] [--base URL] < script
+//   node .claude/skills/run-hangout-planner/driver.mjs [--signed-in] [--group-events] [--google-server] [--theme dark] [--phone] [--base URL] < script
+//
+// --google-server answers /api/google as a configured server with a stored
+// Google refresh token (one event, two days out).
 //
 // --group-events seeds the (demo-mode) group so Jamie and Taylor share named
 // events with places, and the group shows event details.
@@ -54,6 +57,33 @@ if (flag("--signed-in")) {
         { status: "confirmed", summary: "Dinner with Mo", location: "Pai, Duncan St", start: { dateTime: at(19) }, end: { dateTime: at(21) } },
       ] }),
     });
+  });
+}
+
+if (flag("--google-server")) {
+  // api/google.js as if GOOGLE_CLIENT_ID/SECRET were set and a refresh token stored.
+  const google = { connected: true, deleted: 0 };
+  await context.route("**/api/google**", (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const json = (status, body) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+    if (request.method() === "DELETE") {
+      google.connected = false;
+      google.deleted += 1;
+      return json(200, { configured: true, connected: false });
+    }
+    if (request.method() === "POST") {
+      google.connected = true;
+      return json(200, { configured: true, connected: true });
+    }
+    if (!url.searchParams.has("from")) return json(200, { configured: true, connected: google.connected });
+    const at = (hour) => {
+      const date = new Date();
+      date.setDate(date.getDate() + 2);
+      date.setHours(hour, 0, 0, 0);
+      return date.toISOString();
+    };
+    return json(200, { items: [{ status: "confirmed", summary: "Server-synced brunch", location: "Lady Marmalade", start: { dateTime: at(11) }, end: { dateTime: at(12) } }] });
   });
 }
 
