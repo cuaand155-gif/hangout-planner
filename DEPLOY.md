@@ -20,30 +20,37 @@ visitor's own device. Nothing is shared between people.
    - **Or by hand**, using the names in [`.env.example`](.env.example):
      `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (Settings → API Keys).
 
-   `api/workspace.js` accepts either naming. Note that Vercel cannot rename an
+   Every handler in `api/` accepts either naming (through `api/_supabase.js`).
+   Note that Vercel cannot rename an
    existing variable and will not reveal a secret's value, so correcting a
    wrongly-named one means deleting it and adding a new one.
 4. Redeploy. Variables only apply to the environments they are scoped to, so
    scope them to Preview as well if you want preview URLs to persist too.
 
-The service-role key must stay server-side. It is only read by `api/workspace.js`;
-never put it in `app.js` or any other file the browser downloads. The
-`workspaces` table has row level security on with no policy, so that key is the
-only way in, and the API validates and size-limits every write before it lands.
+The service-role key must stay server-side. It is only read by
+`api/_supabase.js`, on behalf of the handlers in `api/`; never put it in
+`app.js` or any other file the browser downloads. The `workspaces` and
+`google_tokens` tables have row level security on with no policy, so that key
+is the only way in, and the API validates and size-limits every write before
+it lands.
 
 To confirm it worked, open the site: the header next to the date reads `LIVE`
 rather than `DEMO`, and a change made in one browser shows up in another.
 
-## 2. Google sign-in (optional)
+## 2. Google sign-in
 
-Sign-in is not required — a workspace link works for people who never sign in.
-It carries a person's profile between devices and enables workspace locking.
+Once the database is connected, opening any group except the demo
+(`weekend-crew`) needs a Google sign-in: without it the API answers 401 and
+the app shows a sign-in screen. Sign-in also carries a person's profile,
+groups and sharing choices between devices, and is what friends, free now,
+booking links and workspace locking are built on.
 
 1. In Google Cloud Console, create an OAuth client and copy its **Client ID**
    and **Client Secret**.
 2. In Supabase → Authentication → Providers → Google, paste both, and add your
    deployed URL to the redirect allow list.
-3. In [`app.js`](app.js), set `AUTH_CONFIG` to your project:
+3. In [`app.js`](app.js), set `AUTH_CONFIG` to your project (the repository
+   ships with the live project's values):
 
    ```js
    const AUTH_CONFIG = {
@@ -58,16 +65,17 @@ It carries a person's profile between devices and enables workspace locking.
    The publishable (anon) key is designed to be in browser code; the
    service-role key is not. Only ever put the publishable one here.
 
-## 3. Friend requests (optional)
+## 3. Friends, sharing, free now and booking links
 
-Friend requests ride on the same accounts as sign-in and need no extra
-configuration — just the `friend_requests` table, which is in
-`supabase/schema.sql` from step 1. If you ran an earlier version of the schema,
-run it again; every statement is safe to repeat.
+These ride on the same accounts as sign-in and need no extra configuration,
+just their tables from `supabase/schema.sql` (step 1): `friend_requests`,
+`calendar_shares` and `sharing_settings` for friends and who sees what,
+`presence` for free now, and `booking_pages` and `bookings` for booking links.
+If you ran an earlier version of the schema, run it again; every statement is
+safe to repeat.
 
-Calendar sharing between friends uses the `calendar_shares` table from the same
-file. [`supabase/rls-shares-test.sql`](supabase/rls-shares-test.sql) checks its
-policies the same way.
+[`supabase/rls-shares-test.sql`](supabase/rls-shares-test.sql) checks the
+`calendar_shares` policies the same way as the test below.
 
 To confirm the policies are doing their job, run
 [`supabase/rls-test.sql`](supabase/rls-test.sql) in the SQL editor. It creates
@@ -127,23 +135,24 @@ the URL box cannot be used to probe your own network.
 1. Import the repository and choose the project root.
 2. Leave **Framework Preset** as **Other**, and leave **Build Command** and
    **Output Directory** blank.
-3. Add the two environment variables from step 1.
-4. Deploy. `vercel.json` enables clean URLs; `api/*.js` become serverless
-   functions automatically.
+3. Add the two environment variables from step 1 (and, optionally, the two
+   Google ones from step 4).
+4. Deploy. `vercel.json` enables clean URLs and serves `/book/<handle>` from
+   `book.html`; `api/*.js` become serverless functions automatically.
 
 ### Netlify
 
 Set **Publish directory** to `.` and leave the build command empty. The
 handlers in `api/` are written for Vercel's signature; to get shared
-persistence on Netlify, wrap them in Netlify Functions and point the two
-`fetch("/api/…")` calls in `app.js` at the new paths. Without that, the app
-runs in demo mode.
+persistence on Netlify, wrap each one in a Netlify Function and redirect
+`/api/*` to them, and rewrite `/book/*` to `/book.html`. Without that, the app
+runs in demo mode and booking links do not open.
 
 ### GitHub Pages
 
 Pages can host the frontend but cannot run the API, so the app will stay in
-demo mode: a sample workspace with changes kept per device. Choose **Deploy
-from a branch** and the `/ (root)` folder. No rewrite rules are needed.
+demo mode: a sample workspace with changes kept per device, and no booking
+links. Choose **Deploy from a branch** and the `/ (root)` folder.
 
 ## Local preview
 
