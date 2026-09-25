@@ -103,6 +103,7 @@ const STORAGE = {
   published: "gatherly-published-shares",
   checklistDismissed: (slug) => `gatherly-checklist-dismissed:${slug}`,
   appearance: "gatherly-appearance",
+  mineDetails: "gatherly-mine-details",
 };
 
 const supabaseClient = AUTH_CONFIG.configured && window.supabase
@@ -697,11 +698,25 @@ function groupEventsOn(day) {
   return entries;
 }
 
-/** "My availability": your calendar's events as plain busy blocks, no names. */
+/** Whether "My availability" shows your events' names or plain busy blocks. Only you ever see either. */
+function showMineDetails() {
+  const toggle = document.getElementById("mineDetailsToggle");
+  if (toggle && toggle.dataset.ready) return toggle.checked;
+  try {
+    return window.localStorage.getItem(STORAGE.mineDetails) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** "My availability": your calendar's events, as plain busy blocks or, with details on, named events. */
 function mineBlocksOn(day) {
+  const details = showMineDetails();
   return eventsOnDay(allMyEvents(), day.date)
     .filter((event) => !event.allDay)
-    .map((event) => ({ start: +new Date(event.start), end: +new Date(event.end), block: true }));
+    .map((event) => details
+      ? { start: +new Date(event.start), end: +new Date(event.end), title: event.title || "Busy", location: event.location || "", mine: true, hidden: isHidden(hiddenKeys, event.title) }
+      : { start: +new Date(event.start), end: +new Date(event.end), block: true });
 }
 
 function renderEventLayer(days, slots, isMineView) {
@@ -735,7 +750,7 @@ function renderEventLayer(days, slots, isMineView) {
       const laneCount = Math.max(...overlapping.map((other) => other.lane)) + 1;
       const width = (top.offsetWidth - 6) / laneCount;
       const time = `${formatClock(new Date(entry.from))} – ${formatClock(new Date(entry.end))}`;
-      const height = Math.max(isMineView ? 8 : 20, ((entry.end - entry.start) / 3600000) * hourPx - 2);
+      const height = Math.max(entry.block ? 8 : 20, ((entry.end - entry.start) / 3600000) * hourPx - 2);
       const place = `top:${top.offsetTop + ((entry.start - from) / 3600000) * hourPx + 1}px;height:${height}px;` +
         `left:${top.offsetLeft + 3 + entry.lane * width}px;width:${width - 2}px`;
       if (entry.block) {
@@ -744,7 +759,7 @@ function renderEventLayer(days, slots, isMineView) {
       }
       const detail = [entry.who, entry.location].filter(Boolean).join(" · ");
       // Only whole lines: as many meta lines as the chip has room for, merged into one when short.
-      const meta = [detail, entry.location ? "" : time].filter(Boolean);
+      const meta = [detail, time].filter(Boolean);
       const room = chipMetaLines(height);
       const lines = room >= meta.length ? meta : room >= 1 ? [meta.join(" · ")] : [];
       chips.push(
@@ -1888,6 +1903,17 @@ $("saveUsualWeek").addEventListener("click", async () => {
     { note: `${displayName()} saved a usual week` }
   );
   showToast("Saved. Weeks you have not edited now use this pattern.");
+});
+
+$("mineDetailsToggle").checked = showMineDetails();
+$("mineDetailsToggle").dataset.ready = "1";
+$("mineDetailsToggle").addEventListener("change", (event) => {
+  try {
+    window.localStorage.setItem(STORAGE.mineDetails, event.target.checked ? "1" : "0");
+  } catch {
+    /* Storage blocked: the switch still works until reload. */
+  }
+  renderGrid();
 });
 
 $("clearMyWeek").addEventListener("click", async () => {

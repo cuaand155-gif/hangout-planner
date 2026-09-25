@@ -320,6 +320,26 @@ describe("booking link owner", () => {
   });
 });
 
+describe("my availability", () => {
+  browserTest("shows plain busy blocks, or your own event names with the switch on, and remembers it", { signedIn: true }, async ({ page, go }) => {
+    await go("/");
+    await page.locator("#mineViewTab").click();
+    await page.locator(".busy-block").first().waitFor();
+    assert.equal(await page.locator("#calendarGrid .event-chip").count(), 0, "busy blocks only by default");
+    await page.locator("#mineDetailsToggle").check();
+    await page.locator("#calendarGrid .event-chip").first().waitFor();
+    const chips = await page.$$eval("#calendarGrid .event-chip", (list) => list.map((chip) => chip.innerText));
+    assert.equal(await page.locator("#calendarGrid .busy-block").count(), 0);
+    assert.ok(chips.some((text) => text.startsWith("Soccer") && text.includes("Riverdale Park") && /PM/.test(text)), "name, place and time");
+    await go("/");
+    await page.locator("#mineViewTab").click();
+    await page.locator("#calendarGrid .event-chip").first().waitFor();
+    assert.ok(await page.locator("#mineDetailsToggle").isChecked(), "remembered after reload");
+    await page.locator("#groupViewTab").click();
+    assert.ok(!(await page.locator("#mineDetailsToggle").isVisible()), "only on My availability");
+  });
+});
+
 describe("layout", () => {
   const overlaps = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 
