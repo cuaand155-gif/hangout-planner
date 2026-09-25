@@ -139,10 +139,56 @@ test("a revoked grant forgets the stored token and asks to reconnect", async (t)
   const id = `3333333${++userCounter}-3333-4333-8333-333333333333`;
   const { table } = fakeServices(t, { stored: sealToken("1//old", SECRET), tokenReply: { status: 400, body: { error: "invalid_grant" } } });
   t.mock.method(globalThis, "fetch", wrapUser(globalThis.fetch, id));
+  t.mock.method(console, "warn", () => {});
   const result = await call({ query: RANGE });
   assert.equal(result.status, 401);
   assert.equal(result.body.reconnect, true);
   assert.equal(table.row, null);
+});
+
+test("keys pasted with a trailing newline still work", async (t) => {
+  withEnv(t);
+  process.env.GOOGLE_CLIENT_ID = "client-id\n";
+  process.env.GOOGLE_CLIENT_SECRET = `${SECRET}\n`;
+  const id = `4444444${++userCounter}-4444-4444-8444-444444444444`;
+  const { calls } = fakeServices(t, { stored: sealToken("1//refresh-token", SECRET) });
+  t.mock.method(globalThis, "fetch", wrapUser(globalThis.fetch, id));
+  const result = await call({ query: RANGE });
+  assert.equal(result.status, 200);
+  const refresh = calls.find((entry) => entry.href === "https://oauth2.googleapis.com/token");
+  assert.match(String(refresh.body), /client_id=client-id&client_secret=client-secret&/);
+});
+
+test("a wrong server client keeps the stored token and does not ask to reconnect", async (t) => {
+  withEnv(t);
+  const id = `5555555${++userCounter}-5555-4555-8555-555555555555`;
+  const { table } = fakeServices(t, { stored: sealToken("1//kept", SECRET), tokenReply: { status: 401, body: { error: "invalid_client" } } });
+  t.mock.method(globalThis, "fetch", wrapUser(globalThis.fetch, id));
+  t.mock.method(console, "warn", () => {});
+  const result = await call({ query: RANGE });
+  assert.equal(result.status, 503);
+  assert.equal(result.body.reason, "setup");
+  assert.notEqual(result.body.reconnect, true);
+  assert.ok(table.row, "the person's consent is kept");
+});
+
+test("calendar access left unticked on Google's consent screen says so", async (t) => {
+  withEnv(t);
+  const id = `6666666${++userCounter}-6666-4666-8666-666666666666`;
+  fakeServices(t, { stored: sealToken("1//x", SECRET) });
+  const inner = globalThis.fetch;
+  t.mock.method(globalThis, "fetch", wrapUser(async (url, init) => {
+    if (String(url).startsWith("https://www.googleapis.com/calendar/v3/")) {
+      return new Response(JSON.stringify({ error: { code: 403, status: "PERMISSION_DENIED", errors: [{ reason: "insufficientPermissions" }] } }), { status: 403 });
+    }
+    return inner(url, init);
+  }, id));
+  t.mock.method(console, "warn", () => {});
+  const result = await call({ query: RANGE });
+  assert.equal(result.status, 401);
+  assert.equal(result.body.reconnect, true);
+  assert.equal(result.body.reason, "scope");
+  assert.match(result.body.error, /See your calendars/);
 });
 
 test("ranges longer than four months or backwards are refused", async (t) => {

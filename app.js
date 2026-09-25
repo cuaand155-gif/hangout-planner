@@ -1472,6 +1472,19 @@ async function syncGoogle({ silent = false, quiet = false } = {}) {
     const response = token
       ? await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?${params}`, { headers: { Authorization: `Bearer ${token}` } })
       : await googleApi("GET", { from: range.from.toISOString(), to: range.to.toISOString() });
+    if (!token && !response.ok) {
+      // Only a server answer that says so means Google itself let go; a lapsed
+      // Waddle sign-in or a Google hiccup keeps the stored connection.
+      const answer = await response.json().catch(() => ({}));
+      if (!answer.reconnect) {
+        if (!silent) showToast(response.status === 401 ? "Sign in to Waddle again to keep Google syncing." : answer.error || "Could not reach Google Calendar.");
+        return null;
+      }
+      googleServer.connected = false;
+      renderGoogleState();
+      if (!silent) showToast(answer.error || "Google stopped sharing your calendar. Tap Connect again.");
+      return null;
+    }
     if (response.status === 401 || response.status === 403) {
       if (token) clearGoogleToken();
       else googleServer.connected = false;
@@ -2524,7 +2537,7 @@ function renderFriends(errorMessage) {
               ? `<button type="button" data-add-friend="${escapeAttribute(row.id)}">Link to them</button>`
               : `<button type="button" data-add-friend="${escapeAttribute(row.id)}">Add to group</button>`;
           const calendar = party.id
-            ? `<button type="button" class="quiet" data-view-calendar="${escapeAttribute(party.id)}" data-friend-name="${escapeAttribute(party.name)}">Calendar</button>`
+            ? `<button type="button" data-view-calendar="${escapeAttribute(party.id)}" data-friend-name="${escapeAttribute(party.name)}">Calendar</button>`
             : "";
           return friendRowMarkup(row, calendar + action, { withStatus: true });
         })
