@@ -185,6 +185,8 @@ const presenceStore = supabaseClient ? createPresenceStore(supabaseClient) : nul
 let hiddenKeys = new Set();
 // Friends at a glance: their "free now" and what their shared calendar says.
 const glance = { presence: new Map(), shares: new Map() };
+// Server-side Google syncing (api/google.js): available here? consent stored?
+const googleServer = { configured: false, connected: false, handedOver: null };
 
 let demoNoticeShown = false;
 const noteDemoMode = () => {
@@ -1434,7 +1436,7 @@ async function importIcs(url, { silent = false, quiet = false } = {}) {
 
 async function syncGoogle({ silent = false, quiet = false } = {}) {
   const token = googleToken();
-  if (!token) {
+  if (!token && !googleServer.connected) {
     if (!silent) showToast("Connect Google Calendar first.");
     return null;
   }
@@ -1448,13 +1450,24 @@ async function syncGoogle({ silent = false, quiet = false } = {}) {
   });
   let payload;
   try {
-    const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?${params}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    // The browser's hour-long token when there is one; otherwise the server,
+    // which renews access by itself (see api/google.js).
+    const response = token
+      ? await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events?${params}`, { headers: { Authorization: `Bearer ${token}` } })
+      : await googleApi("GET", { from: range.from.toISOString(), to: range.to.toISOString() });
     if (response.status === 401 || response.status === 403) {
-      clearGoogleToken();
+      if (token) clearGoogleToken();
+      else googleServer.connected = false;
       renderGoogleState();
-      if (!silent) showToast("Google calendar access ran out (Google allows about an hour). Tap Connect again, or add your secret iCal address for nonstop syncing.");
+      if (!silent) {
+        showToast(token && googleServer.connected
+          ? "Refreshing Google access…"
+          : googleServer.configured
+            ? "Google stopped sharing your calendar. Tap Connect again."
+            : "Google calendar access ran out (Google allows about an hour). Tap Connect again, or add your secret iCal address for nonstop syncing.");
+      }
+      // The browser token ran out but the server can still renew: try once more that way.
+      if (token && googleServer.connected) return syncGoogle({ silent, quiet });
       return null;
     }
     if (!response.ok) throw new Error(String(response.status));
@@ -1487,13 +1500,19 @@ async function syncGoogle({ silent = false, quiet = false } = {}) {
   return count;
 }
 
+function googleConnected() {
+  return Boolean(googleToken()) || googleServer.connected;
+}
+
 function renderGoogleState() {
-  const connected = Boolean(googleToken());
+  const connected = googleConnected();
   const button = $("googleCalendarButton");
   button.textContent = connected ? "Synced" : "Connect";
   button.classList.toggle("connected", connected);
   $("googleCalendarState").textContent = connected
-    ? "Connected. Google only allows about an hour at a time, then you'll be asked to connect again. For syncing that never stops, add your calendar's secret iCal address below."
+    ? googleServer.connected
+      ? "Connected. Keeps syncing on its own while you use Waddle, on any device you sign in on."
+      : "Connected. Google only allows about an hour at a time, then you'll be asked to connect again. For syncing that never stops, add your calendar's secret iCal address below."
     : "Sync busy times and show schedule overlaps.";
 }
 
@@ -1521,7 +1540,7 @@ async function autoSyncCalendars() {
       changed = changed || importIcs.lastChanged;
     }
     const google = calendarSources.find((entry) => entry.type === "google");
-    if (googleToken() && dueForSync(google?.syncedAt)) {
+    if (googleConnected() && dueForSync(google?.syncedAt)) {
       const count = await syncGoogle({ silent: true, quiet: true });
       if (count !== null) changed = changed || syncGoogle.lastChanged;
     }
@@ -1975,7 +1994,7 @@ $("calendarButton").addEventListener("click", () => {
 });
 
 $("googleCalendarButton").addEventListener("click", async () => {
-  if (googleToken()) {
+  if (googleConnected()) {
     await syncGoogle();
     renderGoogleState();
     return;
@@ -2034,6 +2053,12 @@ $("calendarSources").addEventListener("click", (event) => {
   saveSources();
   if (removed) {
     delete myEvents[removed.type === "google" ? "google" : `ics:${removed.url}`];
+    if (removed.type === "google") {
+      clearGoogleToken();
+      if (googleServer.connected) googleApi("DELETE").catch(() => {});
+      googleServer.connected = false;
+      renderGoogleState();
+    }
     saveMyEvents();
     renderMyCalendar();
     schedulePublish();
@@ -2044,7 +2069,7 @@ $("calendarSources").addEventListener("click", (event) => {
 
 $("syncCalendarButton").addEventListener("click", async () => {
   const icsSources = calendarSources.filter((source) => source.type === "ics");
-  const hasGoogle = Boolean(googleToken());
+  const hasGoogle = googleConnected();
   if (!icsSources.length && !hasGoogle) {
     renderSources();
     renderGoogleState();
@@ -3611,6 +3636,7 @@ async function start() {
         await loadFriends({ force: true });
         await loadRemoteSharing();
         loadGlance();
+        loadGoogleServer();
         loadRemoteGroups();
       } else {
         renderFriends();
@@ -3631,6 +3657,7 @@ async function start() {
   renderMyCalendar();
   await loadRemoteSharing();
   loadGlance();
+  await loadGoogleServer();
   autoSyncCalendars();
 
   // Coming back from the Google consent screen: pull busy times straight away.
@@ -3674,16 +3701,56 @@ function setGoogleToken(token) {
 function clearGoogleToken() {
   try {
     window.localStorage.removeItem(STORAGE.googleToken);
-    clearGoogleToken();
+    window.sessionStorage.removeItem(STORAGE.googleToken); // where older versions kept it
   } catch {
     /* Nothing stored. */
   }
+}
+
+/** Calls api/google.js as the signed-in person. Returns the fetch Response. */
+async function googleApi(method, query = null, body = null) {
+  const token = await accessToken();
+  return fetch(`/api/google${query ? `?${new URLSearchParams(query)}` : ""}`, {
+    method,
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(body ? { "Content-Type": "application/json" } : {}) },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+}
+
+/** Whether this server can keep Google syncing on its own, and whether it has your consent stored. */
+async function loadGoogleServer() {
+  if (!ui.user) {
+    googleServer.configured = false;
+    googleServer.connected = false;
+    renderGoogleState();
+    return;
+  }
+  try {
+    const payload = await (await googleApi("GET")).json();
+    googleServer.configured = payload.configured === true;
+    googleServer.connected = payload.connected === true;
+  } catch {
+    /* Offline or no server: keep the browser-only flow. */
+  }
+  renderGoogleState();
 }
 
 /** Only the "Connect Google Calendar" round trip carries calendar access; a plain sign-in's token can't read calendars. */
 function captureProviderToken(authSession) {
   if (authSession?.provider_token && new URLSearchParams(window.location.search).has("calendar")) {
     setGoogleToken(authSession.provider_token);
+    // The refresh token comes only this once: hand it to the server so syncing outlives the hour.
+    if (authSession.provider_refresh_token && authSession.provider_refresh_token !== googleServer.handedOver) {
+      googleServer.handedOver = authSession.provider_refresh_token;
+      googleApi("POST", null, { refreshToken: authSession.provider_refresh_token })
+        .then((response) => response.json())
+        .then((payload) => {
+          googleServer.configured = payload.configured === true;
+          googleServer.connected = payload.connected === true;
+          renderGoogleState();
+        })
+        .catch(() => {});
+    }
     if (!calendarSources.some((source) => source.type === "google")) {
       calendarSources.push({ type: "google", label: "Google Calendar", url: "google" });
       saveSources();

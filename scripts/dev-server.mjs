@@ -32,6 +32,7 @@ const ROUTES = {
   "/api/calendar": () => import("../api/calendar.js"),
   "/api/groups": () => import("../api/groups.js"),
   "/api/book": () => import("../api/book.js"),
+  "/api/google": () => import("../api/google.js"),
 };
 
 /** Mimics the response helpers the handlers rely on (status/json/setHeader). */
