@@ -29,3 +29,4 @@ Busy/free is the baseline everywhere; names and places are always something the 
 
 - Never send email, change a real calendar or reply to invitations while building or testing; use the fakes in `.claude/skills/run-hangout-planner/`.
 - How to run and test the app: `.claude/skills/run-hangout-planner/SKILL.md`.
+- What Waddle must include, what proves each feature works, and what's left: [BLUEPRINT.md](BLUEPRINT.md). Update its status table when you add or change a feature.
