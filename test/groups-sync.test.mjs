@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { GROUP_LIMIT, forgetGroup, mergeGroups, newGroupSlug, rememberGroup } from "../lib/groups.js";
+import { GROUP_LIMIT, forgetGroup, mergeGroups, newGroupSlug, rememberGroup, renameGroup } from "../lib/groups.js";
 import { dueForSync, sameBusy } from "../lib/sync.js";
 
 test("a new group slug keeps the name readable and adds an unguessable suffix", () => {
@@ -65,6 +65,17 @@ test("a calendar is due when never synced or older than the interval", () => {
   assert.equal(dueForSync("2026-09-23T11:45:00Z", now), false);
   assert.equal(dueForSync("2026-09-23T11:30:00Z", now), true);
   assert.equal(dueForSync("2026-09-23T11:59:00Z", now, 60 * 1000), true);
+});
+
+test("renameGroup updates a listed group's name in place, and nothing else", () => {
+  const list = [
+    { slug: "a", name: "Book club", at: "2026-09-25T10:00:00.000Z" },
+    { slug: "b", name: "Weekend crew", at: "2026-09-24T10:00:00.000Z" },
+  ];
+  assert.deepEqual(renameGroup(list, "a", "Book club crew"), [{ ...list[0], name: "Book club crew" }, list[1]]);
+  assert.equal(renameGroup(list, "a", "Book club"), list, "no change, same list");
+  assert.equal(renameGroup(list, "zzz", "New"), list, "a group that isn't listed isn't added");
+  assert.equal(renameGroup(list, "a", ""), list);
 });
 
 test("sameBusy ignores order but notices any real change", () => {
