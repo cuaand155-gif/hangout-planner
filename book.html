@@ -49,7 +49,8 @@
           <label class="field-label" for="guestName">Your name</label>
           <input class="text-input" id="guestName" name="name" autocomplete="name" maxlength="80" required />
           <label class="field-label" for="guestEmail">Email</label>
-          <input class="text-input" id="guestEmail" name="email" type="email" autocomplete="email" maxlength="254" required />
+          <input class="text-input" id="guestEmail" name="email" type="email" autocomplete="email" maxlength="254" required aria-describedby="guestEmailHint" />
+          <p class="form-hint" id="guestEmailHint"></p>
           <label class="field-label" for="guestNote">Anything they should know? <span class="optional">Optional</span></label>
           <textarea class="text-input" id="guestNote" name="note" rows="3" maxlength="500"></textarea>
           <input class="booking-trap" name="website" id="guestWebsite" tabindex="-1" autocomplete="off" aria-hidden="true" />

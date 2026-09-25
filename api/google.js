@@ -13,6 +13,10 @@
 // It needs GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET — the same OAuth client
 // Supabase's Google sign-in uses. Without them every call answers
 // { configured: false } and the app keeps its hourly reconnect.
+//
+// api/book.js also uses the stored token, through googleFreeBusy(), to keep an
+// owner's booking link closed over their Google busy times while Waddle is
+// closed. That asks Google for times only, never titles.
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { bearer, config, restHeaders, send, userFromToken } from "./_supabase.js";
@@ -20,7 +24,7 @@ import { bearer, config, restHeaders, send, userFromToken } from "./_supabase.js
 const MAX_RANGE_DAYS = 120;
 const accessCache = new Map(); // userId -> { token, expires }
 
-function google() {
+export function googleKeys() {
   const id = process.env.GOOGLE_CLIENT_ID || "";
   const secret = process.env.GOOGLE_CLIENT_SECRET || "";
   return id && secret ? { id, secret } : null;
@@ -56,8 +60,8 @@ async function rest(db, path, init = {}) {
   return { ok: result.ok, status: result.status, body };
 }
 
-async function storedToken(db, userId) {
-  const result = await rest(db, `google_tokens?${new URLSearchParams({ select: "refresh_token", user_id: `eq.${userId}`, limit: "1" })}`);
+async function storedToken(db, userId, init = {}) {
+  const result = await rest(db, `google_tokens?${new URLSearchParams({ select: "refresh_token", user_id: `eq.${userId}`, limit: "1" })}`, init);
   if (!result.ok) throw new Error(`db-${result.status}`);
   return Array.isArray(result.body) && result.body[0] ? result.body[0].refresh_token : null;
 }
@@ -67,11 +71,14 @@ async function forget(db, userId) {
   await rest(db, `google_tokens?${new URLSearchParams({ user_id: `eq.${userId}` })}`, { method: "DELETE" });
 }
 
-/** A fresh access token, or null when Google no longer accepts the refresh token. */
-async function accessToken(db, keys, userId) {
+/**
+ * A fresh access token, or null when there is no stored token or Google no
+ * longer accepts it. `signal` bounds the lookups (a timeout, say).
+ */
+async function accessToken(db, keys, userId, { signal } = {}) {
   const cached = accessCache.get(userId);
   if (cached && cached.expires > Date.now()) return cached.token;
-  const sealed = await storedToken(db, userId);
+  const sealed = await storedToken(db, userId, { signal });
   if (!sealed) return null;
   let refreshToken;
   try {
@@ -82,6 +89,7 @@ async function accessToken(db, keys, userId) {
   }
   const result = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
+    signal,
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ client_id: keys.id, client_secret: keys.secret, refresh_token: refreshToken, grant_type: "refresh_token" }),
   });
@@ -92,6 +100,61 @@ async function accessToken(db, keys, userId) {
   }
   accessCache.set(userId, { token: body.access_token, expires: Date.now() + Math.max(60, (body.expires_in || 3600) - 120) * 1000 });
   return body.access_token;
+}
+
+const FREE_BUSY_CHUNK_DAYS = 30;
+
+/** One freeBusy request for the primary calendar: [{ start, end }], or null when Google didn't answer usefully. */
+async function freeBusyPiece(token, userId, start, end, signal) {
+  const result = await fetch("https://www.googleapis.com/calendar/v3/freeBusy", {
+    method: "POST",
+    signal,
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ timeMin: new Date(start).toISOString(), timeMax: new Date(end).toISOString(), items: [{ id: "primary" }] }),
+  });
+  if (result.status === 401 || result.status === 403) accessCache.delete(userId);
+  if (!result.ok) return null;
+  const calendar = (await result.json())?.calendars?.primary;
+  if (!calendar || (Array.isArray(calendar.errors) && calendar.errors.length)) return null;
+  return (Array.isArray(calendar.busy) ? calendar.busy : [])
+    .map((range) => ({ start: new Date(range?.start), end: new Date(range?.end) }))
+    .filter((range) => !Number.isNaN(range.start.getTime()) && !Number.isNaN(range.end.getTime()) && range.end > range.start)
+    .map((range) => ({ start: range.start.toISOString(), end: range.end.toISOString() }));
+}
+
+/**
+ * The owner's busy times from their primary Google calendar, as
+ * [{ start, end }], via Google's freeBusy endpoint (times only, never titles).
+ * Returns null, never throws, whenever it can't answer: Google isn't
+ * configured, the owner never connected, the token was revoked, Google errors
+ * or takes longer than `timeoutMs`. Callers then fall back to what they have.
+ */
+export async function googleFreeBusy(db, userId, { from, to, timeoutMs = 4000 } = {}) {
+  const keys = googleKeys();
+  if (!db || !keys || !userId) return null;
+  // A plain timer rather than AbortSignal.timeout(): that one's timer doesn't
+  // keep the process alive, and it is cleared as soon as Google answers.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new DOMException("Google took too long", "TimeoutError")), timeoutMs);
+  const signal = controller.signal;
+  try {
+    const token = await accessToken(db, keys, userId, { signal });
+    if (!token) return null;
+    // Google limits how long one freeBusy range may be, so ask in pieces of at
+    // most FREE_BUSY_CHUNK_DAYS (one piece for the usual two-week window).
+    const pieces = [];
+    for (let start = new Date(from).getTime(), end = new Date(to).getTime(); start < end; start += FREE_BUSY_CHUNK_DAYS * 864e5) {
+      pieces.push([start, Math.min(end, start + FREE_BUSY_CHUNK_DAYS * 864e5)]);
+    }
+    const answers = await Promise.all(pieces.map(([start, end]) => freeBusyPiece(token, userId, start, end, signal)));
+    if (answers.some((busy) => busy === null)) return null;
+    return answers.flat();
+  } catch (error) {
+    console.warn("Google free/busy skipped:", error?.name || "Error");
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function readBody(request) {
@@ -112,7 +175,7 @@ async function handle(request, response) {
     return send(response, 405, { error: "Method not allowed" });
   }
   const db = config();
-  const keys = google();
+  const keys = googleKeys();
   if (!db || !keys) return send(response, 200, { configured: false, connected: false });
   const userId = await userFromToken(db.url, db.key, bearer(request));
   if (!userId) return send(response, 401, { error: "Sign in first." });

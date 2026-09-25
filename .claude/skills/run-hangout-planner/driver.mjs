@@ -2,132 +2,27 @@
 //
 //   node .claude/skills/run-hangout-planner/driver.mjs [--signed-in] [--group-events] [--google-server] [--theme dark] [--phone] [--base URL] < script
 //
-// --google-server answers /api/google as a configured server with a stored
-// Google refresh token (one event, two days out).
-//
-// --group-events seeds the (demo-mode) group so Jamie and Taylor share named
-// events with places, and the group shows event details.
-//
-// --signed-in swaps supabase-js for fake-supabase.js (an in-memory database
-// with you, a friend "Sam Rivera" and his "free now" status) and seeds two of
-// your own calendar events, so friend and sharing features can be driven.
-// Screenshots go to $SHOTS (default /tmp/waddle-shots).
+// The flags are explained in session.mjs. Screenshots go to $SHOTS (default /tmp/waddle-shots).
 
-import { chromium, devices } from "/opt/node22/lib/node_modules/playwright/index.mjs";
 import { mkdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { openSession } from "./session.mjs";
 
 const args = process.argv.slice(2);
 const flag = (name) => args.includes(name);
 const option = (name, fallback) => (args.includes(name) ? args[args.indexOf(name) + 1] : fallback);
 const base = option("--base", "http://localhost:4173");
-const theme = option("--theme", "light");
 const shots = process.env.SHOTS || "/tmp/waddle-shots";
 mkdirSync(shots, { recursive: true });
 
-const browser = await chromium.launch();
-const context = await browser.newContext(flag("--phone") ? devices["iPhone 13"] : { viewport: { width: 1280, height: 900 } });
-const page = await context.newPage();
-page.setDefaultTimeout(8000);
-const errors = [];
-page.on("pageerror", (error) => errors.push(`pageerror: ${error.message}`));
-// Blocked fonts and (when not --signed-in) the unreachable Supabase CDN are expected noise.
-const NOISE = /ERR_FAILED|ERR_TUNNEL_CONNECTION_FAILED|ERR_CERT_AUTHORITY_INVALID/;
-page.on("console", (message) => message.type() === "error" && !NOISE.test(message.text()) && errors.push(`console: ${message.text()}`));
-
-// Google Fonts can't be reached from the sandbox; failing fast keeps runs quick and logs clean.
-await context.route(/fonts\.(googleapis|gstatic)\.com/, (route) => route.abort());
-
-if (flag("--signed-in")) {
-  const fake = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fake-supabase.js"), "utf8");
-  await context.route("https://cdn.jsdelivr.net/npm/@supabase/**", (route) => route.fulfill({ contentType: "text/javascript", body: fake }));
-  // Google Calendar's events API, answered with two events tomorrow (nav /?calendar=1 to connect).
-  await context.route("https://www.googleapis.com/calendar/v3/**", (route) => {
-    const at = (hour) => {
-      const date = new Date();
-      date.setDate(date.getDate() + 1);
-      date.setHours(hour, 0, 0, 0);
-      return date.toISOString();
-    };
-    route.fulfill({
-      contentType: "application/json",
-      body: JSON.stringify({ items: [
-        { status: "confirmed", summary: "Team standup", location: "Zoom", start: { dateTime: at(10) }, end: { dateTime: at(11) } },
-        { status: "confirmed", summary: "Dinner with Mo", location: "Pai, Duncan St", start: { dateTime: at(19) }, end: { dateTime: at(21) } },
-      ] }),
-    });
-  });
-}
-
-if (flag("--google-server")) {
-  // api/google.js as if GOOGLE_CLIENT_ID/SECRET were set and a refresh token stored.
-  const google = { connected: true, deleted: 0 };
-  await context.route("**/api/google**", (route) => {
-    const request = route.request();
-    const url = new URL(request.url());
-    const json = (status, body) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
-    if (request.method() === "DELETE") {
-      google.connected = false;
-      google.deleted += 1;
-      return json(200, { configured: true, connected: false });
-    }
-    if (request.method() === "POST") {
-      google.connected = true;
-      return json(200, { configured: true, connected: true });
-    }
-    if (!url.searchParams.has("from")) return json(200, { configured: true, connected: google.connected });
-    const at = (hour) => {
-      const date = new Date();
-      date.setDate(date.getDate() + 2);
-      date.setHours(hour, 0, 0, 0);
-      return date.toISOString();
-    };
-    return json(200, { items: [{ status: "confirmed", summary: "Server-synced brunch", location: "Lady Marmalade", start: { dateTime: at(11) }, end: { dateTime: at(12) } }] });
-  });
-}
-
-await context.addInitScript(({ theme, signedIn, groupEvents }) => {
-  if (sessionStorage.getItem("driver-seeded")) return;
-  sessionStorage.setItem("driver-seeded", "1");
-  localStorage.setItem("gatherly-appearance", theme);
-  if (groupEvents) {
-    // Demo mode keeps a cached group, so seed one whose members share named events.
-    const day = (offset, hour) => {
-      const date = new Date();
-      date.setDate(date.getDate() + offset);
-      date.setHours(hour, 0, 0, 0);
-      return date.toISOString();
-    };
-    const iso = (offset) => day(offset, 12).slice(0, 10);
-    const coverage = { from: iso(-7), to: iso(21) };
-    localStorage.setItem("gatherly-workspace:weekend-crew", JSON.stringify({
-      name: "Weekend crew",
-      privacy: "details",
-      members: [
-        { id: "m_jamie", name: "Jamie Miller", coverage, busy: [
-          { start: day(0, 12), end: day(0, 13), title: "Lunch", location: "Kensington Market", source: "ics" },
-          { start: day(1, 15), end: day(1, 17), title: "Climbing", location: "Basecamp", source: "ics" },
-          { start: day(1, 19), end: day(1, 20), source: "ics" },
-        ] },
-        { id: "m_taylor", name: "Taylor Kim", coverage, busy: [
-          { start: day(0, 12), end: day(0, 14), title: "Dentist", location: "Bloor St", source: "google" },
-        ] },
-      ],
-    }));
-  }
-  if (!signedIn) return;
-  const at = (hour) => {
-    const date = new Date();
-    date.setHours(hour, 0, 0, 0);
-    return date.toISOString();
-  };
-  const range = { from: new Date(Date.now() - 7 * 864e5).toISOString(), to: new Date(Date.now() + 21 * 864e5).toISOString() };
-  localStorage.setItem(
-    "gatherly-my-events",
-    JSON.stringify({ "ics:https://example.com/cal.ics": { ...range, events: [{ start: at(9), end: at(10), title: "Therapy" }, { start: at(18), end: at(20), title: "Soccer", location: "Riverdale Park" }] } })
-  );
-}, { theme, signedIn: flag("--signed-in"), groupEvents: flag("--group-events") });
+// The browser setup (stubs, seeded storage, error collection) lives in session.mjs, shared with test/e2e.
+const { browser, page, errors } = await openSession({
+  signedIn: flag("--signed-in"),
+  groupEvents: flag("--group-events"),
+  googleServer: flag("--google-server"),
+  theme: option("--theme", "light"),
+  phone: flag("--phone"),
+});
 
 const commands = {
   // nav <path>: open a page (add ?nosw to skip the service worker)

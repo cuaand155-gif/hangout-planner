@@ -35,7 +35,7 @@
 .activity-list{display:grid;gap:8px;max-height:320px;overflow:auto;margin-top:6px}.activity-row{border:1px solid var(--line);border-radius:9px;padding:11px 12px}.activity-row strong{display:block;font-size:12px;font-weight:500}.activity-row small{color:#a69d95;font-size:10px;display:block;margin-top:4px}
 
 /* People and idea cards */
-.person-card.pending{border-style:dashed}.person-card .card-remove{position:absolute;top:9px;right:9px;background:none;color:#cec6bf;font-size:15px;line-height:1;padding:2px 4px;opacity:0;transition:.15s}.person-card:hover .card-remove,.person-card .card-remove:focus-visible{opacity:1}.person-card .card-remove:hover{color:var(--danger)}.person-card.is-you{border-color:color-mix(in srgb,var(--purple) 27%,var(--paper));background:color-mix(in srgb,var(--purple) 4%,var(--paper))}.person-badge{position:absolute;top:11px;right:11px;font-size:8px;letter-spacing:1px;font-weight:700;color:var(--purple)}.idea-image.sunset{background:#ffd9c9}.idea-image.ocean{background:color-mix(in srgb,var(--purple) 24%,var(--paper))}.idea-image.night{background:#e3deda}.coral-tag{color:var(--purple)}.sky-tag{color:var(--purple-dark)}.avatar-sky{background:color-mix(in srgb,var(--purple) 21%,var(--paper))}.avatar-rose{background:var(--rose)}.idea-card{position:relative;display:flex;flex-direction:column}.idea-card .idea-content{display:flex;flex-direction:column;flex:1}.idea-card .idea-meta{margin-top:auto}.idea-edit{position:absolute;left:12px;top:11px;width:27px;height:27px;background:color-mix(in srgb,var(--paper) 72%,transparent);border-radius:50%;font-size:12px;color:#988677;opacity:0;transition:.15s}.idea-card:hover .idea-edit,.idea-edit:focus-visible{opacity:1}.heart.voted{color:var(--danger)}.empty-note{border:1px dashed var(--line);border-radius:11px;padding:26px;text-align:center;color:#a69d95;font-size:12px;grid-column:1/-1}
+.person-card.pending{border-style:dashed}.person-card .card-remove{position:absolute;bottom:9px;right:9px;background:none;color:#cec6bf;font-size:15px;line-height:1;padding:2px 4px;opacity:0;transition:.15s}.person-card:hover .card-remove,.person-card .card-remove:focus-visible{opacity:1}.person-card .card-remove:hover{color:var(--danger)}.person-card.is-you{border-color:color-mix(in srgb,var(--purple) 27%,var(--paper));background:color-mix(in srgb,var(--purple) 4%,var(--paper))}.person-badge{display:inline-block;margin-left:5px;vertical-align:1px;font-size:8px;letter-spacing:1px;font-weight:700;color:var(--purple)}.idea-image.sunset{background:#ffd9c9}.idea-image.ocean{background:color-mix(in srgb,var(--purple) 24%,var(--paper))}.idea-image.night{background:#e3deda}.coral-tag{color:var(--purple)}.sky-tag{color:var(--purple-dark)}.avatar-sky{background:color-mix(in srgb,var(--purple) 21%,var(--paper))}.avatar-rose{background:var(--rose)}.idea-card{position:relative;display:flex;flex-direction:column}.idea-card .idea-content{display:flex;flex-direction:column;flex:1}.idea-card .idea-meta{margin-top:auto}.idea-edit{position:absolute;left:12px;top:11px;width:27px;height:27px;background:color-mix(in srgb,var(--paper) 72%,transparent);border-radius:50%;font-size:12px;color:#988677;opacity:0;transition:.15s}.idea-card:hover .idea-edit,.idea-edit:focus-visible{opacity:1}.heart.voted{color:var(--danger)}.empty-note{border:1px dashed var(--line);border-radius:11px;padding:26px;text-align:center;color:#a69d95;font-size:12px;grid-column:1/-1}
 
 @media(max-width:620px){.setting-grid{grid-template-columns:1fr}.header-actions{margin-left:0;width:100%}.header-actions .outline-button{flex:1}.copy-row{flex-wrap:wrap}.idea-card{display:grid}.idea-card .idea-content{display:flex}}
 .people-form{margin:0}
@@ -475,7 +475,7 @@ body.gated .app-shell>:not(.signin-gate){visibility:hidden}
 .status-dot{width:9px;height:9px;border-radius:50%;background:var(--faint);flex:none}
 .status-card{display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px;margin:4px 0 16px;padding:14px;border-radius:14px;background:var(--bg)}
 .status-card.on{background:var(--free-soft)}
-.status-card.on .status-dot,.free-now .status-dot{background:var(--free);box-shadow:0 0 0 4px color-mix(in srgb,var(--free) 22%,transparent)}
+.status-card.on .status-dot,section.free-now .status-dot{background:var(--free);box-shadow:0 0 0 4px color-mix(in srgb,var(--free) 22%,transparent)}
 .status-copy{flex:1 1 180px;min-width:0}
 .status-copy strong{display:block;font-size:13px;color:var(--ink)}
 .status-copy small{display:block;font-size:11px;color:var(--muted);margin-top:2px}
@@ -487,8 +487,8 @@ body.gated .app-shell>:not(.signin-gate){visibility:hidden}
 .friend-status{display:block;font-size:11px;font-weight:600;margin-top:2px;color:var(--muted)}
 .friend-status.free-now{color:var(--free)}
 .avatar.is-free{box-shadow:0 0 0 2px var(--surface),0 0 0 4px var(--free)}
-.free-now{display:flex;align-items:center;gap:8px;overflow-x:auto;margin:0 0 28px;padding:4px 2px 8px;scrollbar-width:none}
-.free-now::-webkit-scrollbar{display:none}
+section.free-now{display:flex;align-items:center;gap:8px;overflow-x:auto;margin:0 0 28px;padding:4px 2px 8px;scrollbar-width:none}
+section.free-now::-webkit-scrollbar{display:none}
 .free-now-label{display:inline-flex;align-items:center;gap:8px;flex:none;font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--free);margin-right:4px}
 .free-chip{display:inline-flex;align-items:center;gap:9px;flex:none;border:0;border-radius:999px;background:var(--surface);box-shadow:var(--shadow);padding:6px 14px 6px 6px;text-align:left;color:var(--ink);transition:transform .25s var(--ease),box-shadow .25s var(--ease)}
 .free-chip:hover{transform:translateY(-1px);box-shadow:var(--shadow-lift)}
@@ -530,3 +530,19 @@ body.gated .app-shell>:not(.signin-gate){visibility:hidden}
 .busy-block{position:absolute;z-index:1;pointer-events:none;border-radius:6px;background:var(--mine-busy)}
 .calendar-grid.editing .slot.mine-busy{background:var(--mine-busy)}
 #mineLegend .legend-dot.busy{background:var(--mine-busy)}
+
+/* Phone: the menu drawer dims the page behind it (tap to close), and the hero buttons line up with the text. */
+.menu-backdrop{display:none}
+@media(max-width:620px){
+.menu-backdrop{display:block;position:fixed;inset:0;z-index:2;background:rgba(35,28,23,.32);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)}
+:root[data-theme="dark"] .menu-backdrop{background:rgba(10,7,5,.55)}
+.sidebar{z-index:3}
+.hero-actions{align-self:stretch;align-items:stretch}
+.hero-actions button{flex:1 1 auto;justify-content:center}
+}
+/* Narrow screens: a friend's actions move under their name instead of squeezing it. */
+@media(max-width:480px){
+.friend-row:has(> .avatar + div + .friend-actions){flex-wrap:wrap;row-gap:8px}
+.friend-row > .avatar + div:has(+ .friend-actions){flex:1 1 calc(100% - 40px)}
+.friend-row > .avatar + div + .friend-actions{margin-left:40px}
+}

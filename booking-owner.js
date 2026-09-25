@@ -3,7 +3,7 @@
 // with the signed-in user's own token, so row level security decides what is
 // visible (see supabase/schema.sql); visitors use /api/book instead.
 
-import { BUFFERS, DURATIONS, bookingLinks, busyForBooking, normalizeBookingSettings, normalizeHandle, sameBusy, suggestHandle } from "./lib/booking.js";
+import { BUFFERS, DURATIONS, bookingLinks, busyForBooking, normalizeBookingSettings, normalizeHandle, sameBusy, suggestHandle, usesCalendars } from "./lib/booking.js";
 
 const $ = (id) => document.getElementById(id);
 const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -16,19 +16,13 @@ const timeOnly = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "
 // New rows get updated_at from the database default; owners may not set it on insert.
 const withoutUpdatedAt = ({ updated_at: _ignored, ...rest }) => rest;
 const PAGE_COLUMNS = "id,handle,title,owner_name,settings,busy,ics_urls,active,feed_token";
-/** Whether a saved page blocks calendar busy times (no page yet: the default, on). */
-function usesCalendars(page) {
-  if (!page) return true;
-  const raw = page.settings && typeof page.settings === "object" ? page.settings : {};
-  // Pages saved before the setting existed only kept calendar links when it was on.
-  return "useCalendars" in raw ? raw.useCalendars !== false : (page.ics_urls || []).length > 0;
-}
 const options = (values, label, selected) =>
   values.map((value) => `<option value="${value}"${Number(value) === Number(selected) ? " selected" : ""}>${label(value)}</option>`).join("");
 
 /**
  * Wires the booking dialog. `app` supplies what lives in app.js:
- * { supabase, user(), displayName(), calendarLinks(), calendarEvents(), hasCalendars(), showToast, openDialog, openAccount, svgIcon, escapeHtml }
+ * { supabase, user(), accessToken(), displayName(), calendarLinks(), calendarEvents(), hasCalendars(), googleOnServer(),
+ *   showToast, openDialog, openAccount, svgIcon, escapeHtml }
  */
 export function initBookingOwner(app) {
   const dialog = $("bookingDialog");
@@ -90,6 +84,9 @@ export function initBookingOwner(app) {
     const parts = [];
     if (links.length) {
       parts.push(`Your ${links.length} calendar link${links.length === 1 ? " is" : "s are"} checked by the server, so ${links.length === 1 ? "it stays" : "they stay"} fresh even while Waddle is closed.`);
+    }
+    if (app.googleOnServer()) {
+      parts.push("The server also checks your Google Calendar directly, so it stays current while Waddle is closed.");
     }
     if (app.hasCalendars()) {
       parts.push("Busy times from every calendar you've connected are saved to the link too (times only, never names), and refresh whenever you open Waddle.");
@@ -243,15 +240,39 @@ export function initBookingOwner(app) {
   $("bookingList").addEventListener("click", async (event) => {
     const button = event.target.closest("[data-cancel-booking]");
     if (!button) return;
-    if (!window.confirm("Cancel this booking? The time opens up again. Let them know yourself — Waddle doesn't email guests yet.")) return;
+    if (!window.confirm("Cancel this booking? The time opens up again.")) return;
+    const result = await cancelBooking(button.dataset.cancelBooking);
+    if (!result.ok) return app.showToast(result.error || "Could not cancel that booking.");
+    app.showToast(result.emailed ? "Booking cancelled. We emailed them." : "Booking cancelled. No email went out, so let them know yourself.");
+    loadBookings();
+  });
+
+  /**
+   * Cancels through the server, which also emails the guest when email is set
+   * up. A server without a database (local demo) answers 503: then cancel
+   * directly, which row level security allows for your own bookings.
+   */
+  async function cancelBooking(id) {
+    try {
+      const token = await app.accessToken();
+      const response = await fetch("/api/book", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ action: "owner-cancel", id }),
+      });
+      if (response.status !== 503) {
+        const body = await response.json().catch(() => ({}));
+        return { ok: response.ok, emailed: body.emailed === true, error: body.error };
+      }
+    } catch {
+      /* Server unreachable: fall through to cancelling directly. */
+    }
     const { error } = await app.supabase
       .from("bookings")
       .update({ status: "cancelled", cancelled_at: new Date().toISOString() })
-      .eq("id", button.dataset.cancelBooking);
-    if (error) return app.showToast("Could not cancel that booking.");
-    app.showToast("Booking cancelled.");
-    loadBookings();
-  });
+      .eq("id", id);
+    return { ok: !error, emailed: false };
+  }
 
   async function copy(text, done) {
     try {

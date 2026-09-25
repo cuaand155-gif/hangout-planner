@@ -16,11 +16,30 @@ No build step, no frontend framework, no npm dependencies.
 ```bash
 npm run dev          # http://localhost:4173
 npm test             # unit and API tests, no dependencies
+npm run test:e2e     # browser tests in headless Chromium (see below)
 ```
 
 `npm run dev` serves the static files *and* the `/api` handlers, so the app
 behaves the same locally as it does deployed. Without database credentials it
 runs in demo mode: a sample workspace, with your changes kept in this browser.
+
+### Browser tests
+
+`npm run test:e2e` runs `test/e2e/app.e2e.mjs`, a Playwright suite that starts
+its own dev server on a free port, drives headless Chromium through the main
+flows and stops the server afterwards: the group view, proposing and voting on
+a plan and RSVPing, painting My availability, connecting and disconnecting
+Google Calendar (browser token and server sync), making an event private in
+Who sees what, the Free now strip, booking and cancelling on a public booking
+page, cancelling as the owner, a few layout checks, and phone and dark-theme
+smoke tests. Any page error fails the test.
+
+It adds no dependency: it uses Playwright from `PLAYWRIGHT_PATH`
+(default `/opt/node22/lib/node_modules/playwright/index.mjs`) or an installed
+`playwright` package, and skips every test with a message when neither is
+there. Nothing reaches the network: sign-in is `fake-supabase.js`, and Google
+and `/api/book` are stubbed. The setup is shared with the agent driver in
+`.claude/skills/run-hangout-planner/` (`session.mjs`).
 
 ## How it works
 
@@ -44,11 +63,12 @@ runs in demo mode: a sample workspace, with your changes kept in this browser.
 | `lib/sync.js` | When a saved calendar is due for a refresh, and whether a refresh changed anything. |
 | `lib/checklist.js`, `lib/appearance.js`, `lib/palettes.js`, `lib/avatar.js`, `lib/pwa.js` | The getting-started steps, theme and colour choices, profile photos, and install prompts. |
 | `api/_supabase.js` | Shared by the handlers: reads the database settings and checks sign-in tokens. Not an endpoint. |
+| `api/_email.js` | Booking emails through Resend, off until configured (see DEPLOY.md). Not an endpoint. |
 | `api/workspace.js` | Loads and saves the shared workspace, with validation and conflict detection. |
 | `api/groups.js` | Lists a signed-in person's groups, so the list follows them between devices. |
 | `api/calendar.js` | Fetches a calendar feed server-side, with the guards an inbound URL needs. |
-| `api/google.js` | Keeps Google Calendar syncing past Google's one-hour limit (optional; see DEPLOY.md). |
-| `api/book.js` | Open slots, bookings and cancellations for booking links, plus the owner's bookings feed. |
+| `api/google.js` | Keeps Google Calendar syncing past Google's one-hour limit, and answers booking links' free/busy checks (optional; see DEPLOY.md). |
+| `api/book.js` | Open slots, bookings and cancellations for booking links, the owner's bookings feed, and booking emails when set up. |
 | `supabase/schema.sql` | Every table, policy and function: `workspaces`, `profiles`, `friend_requests`, `calendar_shares`, `sharing_settings`, `presence`, `booking_pages`, `bookings` and `google_tokens`. Safe to run again. |
 | `supabase/rls-shares-test.sql` | Proves only you can write your calendar shares and only that friend can read them. |
 | `supabase/rls-test.sql` | Proves the friend-request policies hold; runs in a transaction and rolls back. |
@@ -171,13 +191,19 @@ calendar's busy times blocked** is on, open times skip:
 
 - anything in your calendar links (up to three), which the server re-reads
   itself, so they stay fresh while Waddle is closed;
-- busy times from every calendar you've connected, Google included. The app
-  saves those with the link (times only, never names) whenever you open it
-  and your calendar has changed.
+- your Google Calendar, which the server also asks directly (Google's
+  freeBusy: times only) when it has the Google client env vars and you
+  connected Google, so it stays fresh while Waddle is closed too;
+- busy times from every calendar you've connected. The app saves those with
+  the link (times only, never names) whenever you open it and your calendar
+  has changed.
 
 Bookings show in the same dialog, where you can cancel them, and a private
 calendar feed puts them in your own calendar app. Guests get a calendar file
-and a cancel link.
+and a cancel link on screen. When the server has email set up (DEPLOY.md
+step 5), guests also get a confirmation email with that link, you get a
+notice for each new booking, and both of you hear about cancellations. The
+booking page tells guests which of the two they'll get.
 
 ### Sharing and privacy
 
@@ -231,10 +257,12 @@ See [DEPLOY.md](DEPLOY.md) for hosting, database and Google sign-in setup.
   lasts about an hour, because Supabase hands over Google's token only once.
   Add them (see DEPLOY.md) or use the calendar's secret iCal address.
 - Refreshing happens while Waddle is open. Nothing syncs in the background
-  while it's closed, except that a booking link re-reads its calendar links
-  whenever a guest opens it.
-- Nobody is emailed about bookings. Guests get a cancel link on screen; if
-  you cancel one, tell them yourself.
+  while it's closed, except that a booking link re-reads its calendar links,
+  and your Google Calendar's busy times when the server can, whenever a guest
+  opens it.
+- Booking emails need a Resend account and a verified sender domain
+  (DEPLOY.md step 5). Until then nobody is emailed: guests get a cancel link
+  on screen, and if you cancel one, tell them yourself.
 - Calendar entries are converted from the timezone they were written in,
   including Outlook's Windows zone names. Entries with no timezone at all
   ("floating" times) and zones the server doesn't recognise are read in the

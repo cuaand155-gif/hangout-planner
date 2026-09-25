@@ -79,7 +79,7 @@ test("visitors get open slots and nothing about busy time or calendar links", as
   const result = await call({ query: { handle: "alexi-7fq2x" } });
   assert.equal(result.status, 200);
   assert.ok(result.body.slots.length > 0);
-  assert.deepEqual(Object.keys(result.body.page).sort(), ["duration", "handle", "ownerName", "timeZone", "title"]);
+  assert.deepEqual(Object.keys(result.body.page).sort(), ["duration", "emails", "handle", "ownerName", "timeZone", "title"]);
   const text = JSON.stringify(result.body);
   assert.ok(!text.includes("ics_urls") && !text.includes("busy") && !text.includes("page-1"));
 });

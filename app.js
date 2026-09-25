@@ -735,22 +735,39 @@ function renderEventLayer(days, slots, isMineView) {
       const laneCount = Math.max(...overlapping.map((other) => other.lane)) + 1;
       const width = (top.offsetWidth - 6) / laneCount;
       const time = `${formatClock(new Date(entry.from))} – ${formatClock(new Date(entry.end))}`;
-      const place = `top:${top.offsetTop + ((entry.start - from) / 3600000) * hourPx + 1}px;height:${Math.max(isMineView ? 8 : 20, ((entry.end - entry.start) / 3600000) * hourPx - 2)}px;` +
+      const height = Math.max(isMineView ? 8 : 20, ((entry.end - entry.start) / 3600000) * hourPx - 2);
+      const place = `top:${top.offsetTop + ((entry.start - from) / 3600000) * hourPx + 1}px;height:${height}px;` +
         `left:${top.offsetLeft + 3 + entry.lane * width}px;width:${width - 2}px`;
       if (entry.block) {
         chips.push(`<div class="busy-block" aria-hidden="true" title="Busy · ${escapeAttribute(time)}" style="${place}"></div>`);
         continue;
       }
       const detail = [entry.who, entry.location].filter(Boolean).join(" · ");
+      // Only whole lines: as many meta lines as the chip has room for, merged into one when short.
+      const meta = [detail, entry.location ? "" : time].filter(Boolean);
+      const room = chipMetaLines(height);
+      const lines = room >= meta.length ? meta : room >= 1 ? [meta.join(" · ")] : [];
       chips.push(
         `<div class="event-chip${entry.mine ? " mine" : ""}${entry.hidden ? " private" : ""}" aria-hidden="true" title="${escapeAttribute([entry.title, detail, time].filter(Boolean).join(" · "))}"` +
           ` style="${place}">` +
-          `${entry.hidden ? svgIcon("lock") : ""}<strong>${escapeHtml(entry.title)}</strong><small>${escapeHtml(detail)}</small>` +
-          `${entry.location ? "" : `<small>${escapeHtml(time)}</small>`}</div>`
+          `${entry.hidden ? svgIcon("lock") : ""}<strong>${escapeHtml(entry.title)}</strong>` +
+          `${lines.map((line) => `<small>${escapeHtml(line)}</small>`).join("")}</div>`
       );
     }
   }
   grid.insertAdjacentHTML("beforeend", chips.join(""));
+}
+
+/**
+ * How many 9px meta lines fit under a chip's title at this height. Mirrors
+ * .event-chip in styles.css: 3px padding top and bottom, 10px title and 9px
+ * meta lines at line-height 1.25.
+ */
+function chipMetaLines(height) {
+  const PADDING = 6;
+  const TITLE = 12.5;
+  const META = 11.25;
+  return Math.max(0, Math.floor((height - PADDING - TITLE + 0.25) / META));
 }
 
 // Chip positions come from the laid-out cells, so redraw when the grid resizes.
@@ -870,9 +887,9 @@ function renderPeople() {
           : "Needs update";
     const statusClass = status === "✓ All set" ? "person-status" : "person-status muted";
     return `<article class="person-card${isYou ? " is-you" : ""}${member.pending ? " pending" : ""}">
-      ${isYou ? '<span class="person-badge">YOU</span>' : `<button class="card-remove" data-remove-member="${escapeAttribute(member.id)}" aria-label="Remove ${escapeAttribute(member.name)}">${svgIcon("x")}</button>`}
+      ${isYou ? "" : `<button class="card-remove" data-remove-member="${escapeAttribute(member.id)}" aria-label="Remove ${escapeAttribute(member.name)}">${svgIcon("x")}</button>`}
       <div class="person-top"><div class="avatar ${member.palette}">${escapeHtml(member.initials)}</div><span class="presence${sharedThisWeek ? "" : " away"}"></span></div>
-      <strong>${escapeHtml(member.name)}</strong>
+      <strong>${escapeHtml(member.name)}${isYou ? ' <span class="person-badge">YOU</span>' : ""}</strong>
       <small>Updated ${escapeHtml(formatRelative(member.updatedAt))}</small>
       <span class="${statusClass}">${escapeHtml(status)}</span>
     </article>`;
@@ -1690,10 +1707,12 @@ for (const button of document.querySelectorAll(".close-dialog")) {
 const bookingOwner = initBookingOwner({
   supabase: supabaseClient,
   user: () => ui.user,
+  accessToken: () => accessToken(),
   displayName: () => displayName(),
   calendarLinks: () => calendarSources.map((source) => source.url).filter((url) => /^(https|webcal):\/\//i.test(String(url || ""))),
   calendarEvents: () => allMyEvents(),
   hasCalendars: () => calendarSources.length > 0 || allMyEvents().length > 0,
+  googleOnServer: () => googleServer.configured && googleServer.connected,
   showToast: (message) => showToast(message),
   openDialog: (dialog) => openDialog(dialog),
   openAccount: () => openDialog(dialogs.account),
@@ -3503,14 +3522,19 @@ $("friendNextWeek").addEventListener("click", () => {
 
 /* Navigation chrome */
 
-$("mobileMenu").addEventListener("click", () => {
-  const open = $("sidebar").classList.toggle("open");
+/** Opens or closes the phone menu drawer, with its dimmed backdrop. */
+function setMenuOpen(open) {
+  $("sidebar").classList.toggle("open", open);
+  $("menuBackdrop").hidden = !open;
   $("mobileMenu").setAttribute("aria-expanded", String(open));
-});
+}
+
+$("mobileMenu").addEventListener("click", () => setMenuOpen(!$("sidebar").classList.contains("open")));
+$("menuBackdrop").addEventListener("click", () => setMenuOpen(false));
 
 for (const item of document.querySelectorAll(".nav-item")) {
   item.addEventListener("click", () => {
-    $("sidebar").classList.remove("open");
+    setMenuOpen(false);
     if (!item.getAttribute("href")) return;
     for (const link of document.querySelectorAll(".main-nav .nav-item")) link.classList.remove("active");
     item.classList.add("active");
