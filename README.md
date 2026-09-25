@@ -17,6 +17,7 @@ No build step, no frontend framework, no npm dependencies.
 npm run dev          # http://localhost:4173
 npm test             # unit and API tests, no dependencies
 npm run test:e2e     # browser tests in headless Chromium (see below)
+npm test && npm run test:e2e   # everything, before calling a change done
 ```
 
 `npm run dev` serves the static files *and* the `/api` handlers, so the app
@@ -31,8 +32,12 @@ flows and stops the server afterwards: the group view, proposing and voting on
 a plan and RSVPing, painting My availability, connecting and disconnecting
 Google Calendar (browser token and server sync), making an event private in
 Who sees what, the Free now strip, booking and cancelling on a public booking
-page, cancelling as the owner, a few layout checks, and phone and dark-theme
-smoke tests. Any page error fails the test.
+page, cancelling as the owner, the activity bell, a friend's calendar, each
+Who sees what level as the friend sees it (Nothing, Busy, Picked, Everything, a
+per-friend override, the group level, and sharing more for a while), sharing
+choices following you to another device, sending and accepting a friend
+request, Settings (lock, export, reset), the phone day strip, a few layout
+checks, and phone and dark-theme smoke tests. Any page error fails the test.
 
 It adds no dependency: it uses Playwright from `PLAYWRIGHT_PATH`
 (default `/opt/node22/lib/node_modules/playwright/index.mjs`) or an installed

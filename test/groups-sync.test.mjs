@@ -74,5 +74,6 @@ test("sameBusy ignores order but notices any real change", () => {
   assert.equal(sameBusy([a], [a, b]), false);
   assert.equal(sameBusy([a], [{ ...a, end: "2026-09-21T12:00:00Z" }]), false);
   assert.equal(sameBusy([a], [{ ...a, title: "Dentist" }]), false, "a title appearing is a change");
+  assert.equal(sameBusy([{ ...a, title: "Dentist" }], [{ ...a, title: "Dentist", location: "Bloor St" }]), false, "so is a place");
   assert.equal(sameBusy([], []), true);
 });

@@ -2,7 +2,7 @@
 
 The complete picture of what Waddle is supposed to do, where each piece lives, what proves it works, and what's left. Use it as the checklist before calling Waddle "done", and update it whenever a feature is added or changed. The product rules for what each view may show are in [CLAUDE.md](CLAUDE.md) and win over anything here.
 
-Last checked: 2026-09-25, master `43ff13f`. 227 unit/API tests and 18 browser tests, all passing.
+Last checked: 2026-09-25, master `2b72c38` plus the Phase A browser tests and fixes. 228 unit/API tests and 34 browser tests, all passing (the browser suite ran twice in a row).
 
 ## 1. What Waddle is
 
@@ -31,20 +31,20 @@ Live: https://hangout-planner-omega.vercel.app (also hangout-planner-cuacua.verc
 
 ## 3. Feature inventory
 
-Status key: ✅ proven by an automated browser test · 🧪 proven by unit/API tests only · 👀 checked by hand only · 🙋 needs Alexi (real accounts or a decision)
+Status key: ✅ proven by an automated browser test · 🧪 proven by unit/API tests only · 👀 checked by hand only · 🙋 needs Alexi (real accounts or a decision). A 🧪 row says why it isn't ✅ yet.
 
 ### Groups and people
 
 | Feature | Where | Proven by | Status |
 |---|---|---|---|
 | Demo group loads with no errors | `app.js` | e2e "loads the demo group" | ✅ |
-| Opening a group needs sign-in (when the database is on) | `api/workspace.js` 401 gate | `test/api.test.mjs`, `test/groups-api.test.mjs` | 🧪 |
-| Create, rename and switch between groups | "Your groups", `lib/groups.js`, `api/groups.js` | `groups-api`, `groups-sync` tests | 🧪 |
-| Invite link, add a placeholder person, remove someone | People dialog, `lib/membership.js` | `membership` tests | 🧪 |
-| Friend requests (send, accept) | Friends tab, `lib/friends.js` | `friends` tests | 🧪 |
-| Getting-started checklist for new groups | `lib/checklist.js` | `checklist` tests | 🧪 |
-| Activity feed / bell | `#activityButton` | none | 👀 |
-| Profile: name, avatar colours | `lib/avatar.js`, `lib/palettes.js` | `avatar`, `palettes` tests | 🧪 |
+| Opening a group needs sign-in (when the database is on) | `api/workspace.js` 401 gate | `test/api.test.mjs`, `test/groups-api.test.mjs` | 🧪 (browser test not written yet: Phase A item 2) |
+| Create, rename and switch between groups | "Your groups", `lib/groups.js`, `api/groups.js` | `groups-api`, `groups-sync` tests; renaming also runs in e2e "activity bell" | 🧪 (browser test not written yet: Phase A item 2) |
+| Invite link, add a placeholder person, remove someone | People dialog, `lib/membership.js` | `membership` tests | 🧪 (browser test not written yet: Phase A item 2) |
+| Friend requests (send, accept) | Friends tab, `lib/friends.js` | e2e "send a friend request, they accept it…" (two browsers); `friends` tests | ✅ |
+| Getting-started checklist for new groups | `lib/checklist.js` | `checklist` tests | 🧪 (browser test not written yet: Phase A item 2) |
+| Activity feed / bell | `#activityButton` | e2e "the bell shows a dot for news…" | ✅ |
+| Profile: name, avatar colours | `lib/avatar.js`, `lib/palettes.js` | `avatar`, `palettes` tests | 🧪 (browser test not written yet: Phase A item 2) |
 
 ### Calendars in
 
@@ -52,9 +52,9 @@ Status key: ✅ proven by an automated browser test · 🧪 proven by unit/API t
 |---|---|---|---|
 | Connect Google Calendar, then disconnect | Calendar links, `app.js` | e2e "connect Google…" | ✅ |
 | Google keeps syncing past the hour, on every device | `api/google.js` | e2e `--google-server`; `google-api` tests | ✅ (real Google: 🙋) |
-| Any ICS link (iCloud, Outlook, Google secret address) | `api/calendar.js`, `lib/ics.js` | `api`, `ics` tests | 🧪 |
+| Any ICS link (iCloud, Outlook, Google secret address) | `api/calendar.js`, `lib/ics.js` | `api`, `ics` tests | 🧪 (browser test not written yet: Phase A item 2) |
 | Paint your own busy hours | My availability | e2e "painting marks hours busy" | ✅ |
-| Save as my usual week; I'm free all week | `#saveUsualWeek`, `#clearMyWeek` | `planner` tests (weekly blocks) | 🧪 |
+| Save as my usual week; I'm free all week | `#saveUsualWeek`, `#clearMyWeek` | `planner` tests (weekly blocks) | 🧪 (browser test not written yet: Phase A item 2) |
 
 ### Seeing schedules (rules in CLAUDE.md)
 
@@ -64,19 +64,19 @@ Status key: ✅ proven by an automated browser test · 🧪 proven by unit/API t
 | My availability: busy blocks, or your schedule with "Show event details" | `#mineDetailsToggle` | e2e "plain busy blocks, or…" | ✅ |
 | Group calendar: one row per person, names only when the group allows | `renderGroupCalendar` | e2e "group calendar" | ✅ |
 | Your calendar agenda: pick events to share, lock private ones | `#mycalendar` | e2e "Who sees what: a private event…" | ✅ |
-| A friend's calendar view | Friends → Calendar | none | 👀 |
-| Best-time cards and the chosen window | `bestTimes`, `planner.js` | `planner` tests | 🧪 |
-| Phone: one day at a time | `#dayStrip` | none (phone smoke only checks the menu and width) | 👀 |
+| A friend's calendar view | Friends → Calendar | e2e "Friends → Calendar shows what they shared…" | ✅ |
+| Best-time cards and the chosen window | `bestTimes`, `planner.js` | `planner` tests | 🧪 (browser test not written yet: Phase A item 2) |
+| Phone: one day at a time | `#dayStrip` | e2e "one day at a time: pick a day from the strip, or swipe" | ✅ |
 
 ### Sharing and privacy
 
 | Feature | Where | Proven by | Status |
 |---|---|---|---|
-| Levels: Nothing / Busy / Picked / Everything; per-friend override; group level | Who sees what, `lib/sharing.js` | `sharing` tests | 🧪 |
-| Share more for a while (today, weekend, 24 h, 7 days) | `grantEnd`, `publish_share` RPC | `sharing` tests | 🧪 |
-| Private events hidden from everyone (only a hash is stored) | `hideHash`, `withoutHidden` | `sharing` tests; e2e | ✅ |
-| Choices sync across devices | `sharing_settings`, `mergeSharing` | `sharing` tests | 🧪 (two devices: 🙋) |
-| Database only lets friends read what was shared | RLS, `publish_share`, `shared_calendars` | `supabase/rls-shares-test.sql` (run against the live project) | 🧪 |
+| Levels: Nothing / Busy / Picked / Everything; per-friend override; group level | Who sees what, `lib/sharing.js` | e2e "who sees what, as a friend sees it" (each level opened in a second browser as Sam; the group level checked in what the group receives); `sharing` tests | ✅ |
+| Share more for a while (today, weekend, 24 h, 7 days) | `grantEnd`, `publish_share` RPC | e2e "share more for a while…" (start, until, fallback, stop); `sharing` tests | ✅ |
+| Private events hidden from everyone (only a hash is stored) | `hideHash`, `withoutHidden` | `sharing` tests; e2e (preview, as Sam, and in the group) | ✅ |
+| Choices sync across devices | `sharing_settings`, `mergeSharing` | e2e "sharing choices follow you to another device" (second browser, fake database); `sharing` tests | ✅ (real accounts: 🙋) |
+| Database only lets friends read what was shared | RLS, `publish_share`, `shared_calendars` | `supabase/rls-shares-test.sql` (run against the live project) | 🧪 (a database policy: only SQL against the real project can prove it, not a browser) |
 | Free now status and strip | `lib/presence.js` | e2e "Free now strip" | ✅ |
 
 ### Plans
@@ -84,20 +84,20 @@ Status key: ✅ proven by an automated browser test · 🧪 proven by unit/API t
 | Feature | Where | Proven by | Status |
 |---|---|---|---|
 | Propose a plan, vote on times, pick one, RSVP | Tentative plan, `lib/hangout.js` | e2e "propose a plan…" | ✅ |
-| Repeating plans (weekly etc.) | `#planRepeat` | `hangout` tests | 🧪 |
-| Add to calendar (.ics file or Google link) | `lib/calendar-export.js` | `calendar-export` tests | 🧪 |
-| Activity ideas with photos | Ideas section | `idea-photos` tests | 🧪 |
+| Repeating plans (weekly etc.) | `#planRepeat` | `hangout` tests; e2e "propose a plan" saves a weekly one | 🧪 (browser test not written yet: Phase A item 2) |
+| Add to calendar (.ics file or Google link) | `lib/calendar-export.js` | `calendar-export` tests | 🧪 (browser test not written yet: Phase A item 2) |
+| Activity ideas with photos | Ideas section | `idea-photos` tests | 🧪 (browser test not written yet: Phase A item 2) |
 
 ### Booking links
 
 | Feature | Where | Proven by | Status |
 |---|---|---|---|
-| Owner sets up a link: days, hours, length, gap, notice | `booking-owner.js`, `lib/booking.js` | `booking` tests | 🧪 |
+| Owner sets up a link: days, hours, length, gap, notice | `booking-owner.js`, `lib/booking.js` | `booking` tests | 🧪 (browser test not written yet: Phase A item 2) |
 | Guest picks a time, books, cancels | `book.html`, `api/book.js` | e2e "pick a time, book it…"; `book-api` tests | ✅ |
-| Blocks your calendars' busy times (never names) | `busyForBooking`, `api/book.js` | `booking`, `book-api` tests | 🧪 |
-| Checks Google directly while Waddle is closed | `googleFreeBusy` | `book-services` tests | 🧪 (real Google: 🙋) |
+| Blocks your calendars' busy times (never names) | `busyForBooking`, `api/book.js` | `booking`, `book-api` tests | 🧪 (the blocking happens in `api/book.js`, which needs the database; the owner-side browser test is still to write) |
+| Checks Google directly while Waddle is closed | `googleFreeBusy` | `book-services` tests | 🧪 (server only, no screen; real Google: 🙋) |
 | Owner sees and cancels bookings | Booking dialog | e2e "cancelling…" (both paths) | ✅ |
-| Confirmation and cancellation emails | `api/_email.js` | `book-services` tests; e2e copy check | 🧪 (off until email is set up) |
+| Confirmation and cancellation emails | `api/_email.js` | `book-services` tests; e2e copy check | 🧪 (off until email is set up; tests never send real email) |
 
 ### App-wide
 
@@ -105,8 +105,8 @@ Status key: ✅ proven by an automated browser test · 🧪 proven by unit/API t
 |---|---|---|---|
 | Light / dark / auto theme | `lib/appearance.js` | e2e dark smoke; `appearance` tests | ✅ |
 | Phone layout, menu drawer with backdrop | `styles.css` | e2e phone tests | ✅ |
-| Install to home screen, works offline | `sw.js`, `lib/pwa.js` | `pwa` tests (shell list) | 🧪 |
-| Settings: lock group, export, reset | `#settingsButton` | none | 👀 |
+| Install to home screen, works offline | `sw.js`, `lib/pwa.js` | `pwa` tests (shell list) | 🧪 (browser test not written yet: Phase A item 2) |
+| Settings: lock group, export, reset | `#settingsButton` | e2e "settings" (lock signed out and in, export, reset) | ✅ |
 
 ## 4. The plan
 
@@ -114,10 +114,15 @@ Status key: ✅ proven by an automated browser test · 🧪 proven by unit/API t
 
 Goal: every row above is ✅ or has a named reason it can't be.
 
-1. Browser tests for the 👀 rows: activity feed, a friend's calendar view, settings (lock, export, reset), the phone day strip.
-2. Browser tests for 🧪 rows that have a screen: each sharing level as a friend sees it, save as usual week, create and switch groups, invite and remove a person, send and accept a friend request, "share more for a while" (start and stop), repeating plans, add to calendar, ideas with photos, booking owner setup, the sign-in gate, the offline shell.
-3. One command runs everything: `npm test && npm run test:e2e`, noted in the README.
-4. Update this file's status column and the "last checked" line.
+1. [x] Browser tests for the 👀 rows: activity feed, a friend's calendar view, settings (lock, export, reset), the phone day strip.
+2. [ ] Browser tests for 🧪 rows that have a screen. Done: each sharing level as a friend sees it (plus the per-friend override and the group level), "share more for a while" (start, until, stop), sharing choices on a second device, send and accept a friend request. Still to write (stopped here at Alexi's "finish it"): save as usual week, create and switch groups, invite and remove a person, repeating plans, add to calendar, ideas with photos, booking owner setup, the sign-in gate, the offline shell, and the checklist, profile, ICS link and best-time rows.
+3. [x] One command runs everything: `npm test && npm run test:e2e`, noted in the README.
+4. [x] Update this file's status column and the "last checked" line.
+
+Found and fixed along the way (2026-09-25):
+- On a phone, one swipe moved several days: the day strip, best-time and swipe listeners were added again on every redraw (`app.js`, now wired once).
+- A shared event's place never reached the group: `replaceBusyRange` dropped it, and `sameBusy` didn't compare it (`lib/planner.js`, `lib/sync.js`, with unit tests).
+- "Reset this device" kept the imported calendar events, names included, after removing their calendar links (`app.js`).
 
 Done when: all rows are ✅ except the 🙋 ones, and both test commands pass.
 
