@@ -546,3 +546,4 @@ section.free-now::-webkit-scrollbar{display:none}
 .friend-row > .avatar + div:has(+ .friend-actions){flex:1 1 calc(100% - 40px)}
 .friend-row > .avatar + div + .friend-actions{margin-left:40px}
 }
+.detail-toggle{display:flex;gap:6px;align-items:center;cursor:pointer;color:var(--control-text);font-weight:600}.detail-toggle input{accent-color:var(--purple);margin:0}
