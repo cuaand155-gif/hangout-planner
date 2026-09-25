@@ -35,7 +35,7 @@ import {
 import { applyMembership, findMemberForParty, linkMemberToParty, normalizeEmail, planManualClaim, resolveMembership } from "./lib/membership.js";
 import { createFriendStore, describeParty, partitionRequests, profileIdsFor, rejectionFor } from "./lib/friends.js";
 import { buildPlanIcs, googleCalendarUrl, planUid } from "./lib/calendar-export.js";
-import { forgetGroup, mergeGroups, newGroupSlug, rememberGroup } from "./lib/groups.js";
+import { forgetGroup, mergeGroups, newGroupSlug, rememberGroup, renameGroup } from "./lib/groups.js";
 import { dueForSync, sameBusy } from "./lib/sync.js";
 import { IDEA_PHOTO_HEIGHT, IDEA_PHOTO_MAX_LENGTH, IDEA_PHOTO_WIDTH, coverCrop, isSafeImageDataUrl, squareCrop } from "./lib/avatar.js";
 import { PALETTES, normalizePalette } from "./lib/palettes.js";
@@ -527,6 +527,12 @@ function render() {
 function renderChrome() {
   $("workspaceName").textContent = session.state.name;
   document.title = `${session.state.name} — Waddle`;
+  // A rename (here or by someone else) shows in Your groups straight away.
+  if (ui.workspaceLoaded && !session.needsSignIn) {
+    const listed = localGroups();
+    const renamed = renameGroup(listed, session.slug, session.state.name);
+    if (renamed !== listed) writeJson(STORAGE.groups, renamed);
+  }
   $("todayStamp").textContent = formatDayStamp(new Date()).toUpperCase();
   $("syncState").textContent = ui.saving ? "SAVING" : session.persisted ? "LIVE" : session.offline ? "OFFLINE" : "DEMO";
   $("privacyStatus").textContent = session.state.privacy === "details" ? "Event details shared" : "Busy / free only";
@@ -3787,8 +3793,10 @@ async function start() {
       if (authSession?.user) {
         await loadRemoteProfile(authSession.user);
         // Coming through the sign-in gate: load the group now (that joins it too).
-        if (session.needsSignIn) await loadWorkspace();
-        else await ensureMembership();
+        if (session.needsSignIn) {
+          await loadWorkspace();
+          if (!session.needsSignIn) recordVisit();
+        } else await ensureMembership();
         await loadFriends({ force: true });
         await loadRemoteSharing();
         loadGlance();
@@ -3807,7 +3815,8 @@ async function start() {
 
   await loadWorkspace();
   await applyPendingName();
-  recordVisit();
+  // Behind the sign-in gate nothing about the group is known, not even its name.
+  if (!session.needsSignIn) recordVisit();
   await loadFriends();
   await refreshHiddenKeys();
   renderMyCalendar();

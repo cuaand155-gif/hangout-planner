@@ -36,7 +36,12 @@ page, cancelling as the owner, the activity bell, a friend's calendar, each
 Who sees what level as the friend sees it (Nothing, Busy, Picked, Everything, a
 per-friend override, the group level, and sharing more for a while), sharing
 choices following you to another device, sending and accepting a friend
-request, Settings (lock, export, reset), the phone day strip, a few layout
+request, Settings (lock, export, reset), the phone day strip, saving a usual
+week, creating, renaming and switching groups, the getting-started checklist,
+inviting and removing people, repeating plans, adding a plan to a calendar
+(the .ics file and the Google link; Google itself is never opened), ideas with
+photos, your profile, adding an ICS link, best-time cards, setting up a
+booking link, the sign-in gate, the offline shell and install, a few layout
 checks, and phone and dark-theme smoke tests. Any page error fails the test.
 
 It adds no dependency: it uses Playwright from `PLAYWRIGHT_PATH`
