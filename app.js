@@ -1303,7 +1303,7 @@ function renderSources() {
   container.innerHTML = calendarSources
     .map(
       (source, index) => `<div class="source-row">
-        <div><strong>${escapeHtml(source.label || source.url)}</strong><small>${source.syncedAt ? `Synced ${escapeHtml(formatRelative(source.syncedAt))} · ${source.blocks || 0} busy blocks` : "Not synced yet"}</small></div>
+        <div><strong>${escapeHtml(source.label || source.url)}</strong><small>${source.syncedAt ? `Synced ${escapeHtml(formatRelative(source.syncedAt))} · ${source.blocks || 0} busy block${source.blocks === 1 ? "" : "s"}` : "Not synced yet"}</small></div>
         <button type="button" data-remove-source="${index}" aria-label="Remove this calendar link">${svgIcon("x")}</button>
       </div>`
     )
@@ -1692,6 +1692,8 @@ const bookingOwner = initBookingOwner({
   user: () => ui.user,
   displayName: () => displayName(),
   calendarLinks: () => calendarSources.map((source) => source.url).filter((url) => /^(https|webcal):\/\//i.test(String(url || ""))),
+  calendarEvents: () => allMyEvents(),
+  hasCalendars: () => calendarSources.length > 0 || allMyEvents().length > 0,
   showToast: (message) => showToast(message),
   openDialog: (dialog) => openDialog(dialog),
   openAccount: () => openDialog(dialogs.account),
@@ -2064,7 +2066,7 @@ $("calendarSources").addEventListener("click", (event) => {
     schedulePublish();
     publishKindToGroup(removed.type === "google" ? "google" : "ics", syncRange(), { quiet: true });
   }
-  showToast("Calendar link removed from this device.");
+  showToast(removed?.type === "google" ? "Google Calendar disconnected." : "Calendar link removed from this device.");
 });
 
 $("syncCalendarButton").addEventListener("click", async () => {
@@ -2108,7 +2110,7 @@ async function updateShareSchedule(shared) {
       member.updatedAt = new Date().toISOString();
     }
   });
-  showToast(shared ? "Friends can see your free/busy blocks." : "Your schedule is hidden from the group.");
+  showToast(shared ? "Your groups can see when you're busy." : "Your times are hidden from your groups.");
 }
 
 /* Profile and account */
@@ -3112,7 +3114,11 @@ function acceptedFriends() {
 let publishTimer = null;
 function schedulePublish() {
   clearTimeout(publishTimer);
-  publishTimer = setTimeout(publishToFriends, 600);
+  publishTimer = setTimeout(() => {
+    publishToFriends();
+    // Your booking link keeps the same busy times closed (times only).
+    bookingOwner?.publishBusy();
+  }, 600);
 }
 
 /**
@@ -3729,10 +3735,18 @@ async function loadGoogleServer() {
     const payload = await (await googleApi("GET")).json();
     googleServer.configured = payload.configured === true;
     googleServer.connected = payload.connected === true;
+    // Connected on another device: list it here too, so it can be removed and its sync time kept.
+    if (googleServer.connected) ensureGoogleSource();
   } catch {
     /* Offline or no server: keep the browser-only flow. */
   }
   renderGoogleState();
+}
+
+function ensureGoogleSource() {
+  if (calendarSources.some((source) => source.type === "google")) return;
+  calendarSources.push({ type: "google", label: "Google Calendar", url: "google" });
+  saveSources();
 }
 
 /** Only the "Connect Google Calendar" round trip carries calendar access; a plain sign-in's token can't read calendars. */
@@ -3751,10 +3765,7 @@ function captureProviderToken(authSession) {
         })
         .catch(() => {});
     }
-    if (!calendarSources.some((source) => source.type === "google")) {
-      calendarSources.push({ type: "google", label: "Google Calendar", url: "google" });
-      saveSources();
-    }
+    ensureGoogleSource();
   }
 }
 

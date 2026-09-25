@@ -244,7 +244,7 @@
         <label class="privacy-option active"><input type="radio" name="privacy" value="busy" checked /><span class="radio"></span><span><strong>Busy / free only</strong><small>Show available time blocks without event names or locations.</small></span></label>
         <label class="privacy-option"><input type="radio" name="privacy" value="details" /><span class="radio"></span><span><strong>Show event details</strong><small>Lets names through to this group — but only the events each person allows under My calendar → Who sees what.</small></span></label>
       </div>
-      <p class="privacy-note">▣ <strong>Switching back removes titles.</strong> Event names already imported are stripped from your shared times.</p>
+      <p class="privacy-note"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg> <strong>Switching back removes titles.</strong> Event names already imported are stripped from your shared times.</p>
       <button class="primary-button full" id="savePrivacy">Save privacy setting</button>
     </dialog>
 
@@ -258,7 +258,7 @@
       </div>
       <form class="integration-form" id="icsForm">
         <div class="integration-option">
-          <div class="integration-icon apple">●</div>
+          <div class="integration-icon apple"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></div>
           <div><strong>Apple / iCloud, Outlook, or any ICS link</strong><small>Paste the public or secret <em>.ics</em> address of a calendar. It refreshes by itself every time you open Waddle. For Google, use Settings → your calendar → <em>Secret address in iCal format</em>.</small></div>
         </div>
         <label class="field-label" for="icsUrl">Calendar link</label>
@@ -266,8 +266,8 @@
         <button class="outline-button full" type="submit" id="icsSubmit">Import busy times</button>
       </form>
       <div class="source-list" id="calendarSources"></div>
-      <label class="schedule-toggle"><input type="checkbox" id="shareScheduleToggle" checked /><span><strong>Let friends see my availability</strong><small>Only busy/free blocks are shared unless the group turns on event details.</small></span></label>
-      <p class="privacy-note">▣ <strong>Calendar links stay on this device.</strong> Only the resulting busy blocks are shared with your group.</p>
+      <label class="schedule-toggle"><input type="checkbox" id="shareScheduleToggle" checked /><span><strong>Share my availability with my groups</strong><small>Off keeps your times out of every group's free-time grid. What friends see is set under Who sees what.</small></span></label>
+      <p class="privacy-note"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg> <strong>Calendar links stay private.</strong> They're kept on this device, and with your booking link if it checks them. Groups only get the resulting busy blocks.</p>
     </dialog>
 
     <dialog id="accountDialog">
@@ -379,7 +379,7 @@
         </div>
         <label class="field-label" for="profileDisplayName">Display name</label>
         <input class="text-input" id="profileDisplayName" placeholder="Alex Morgan" required maxlength="60" />
-        <label class="schedule-toggle"><input type="checkbox" id="profileShareSchedule" checked /><span><strong>Share my availability with friends</strong><small>Friends see free/busy blocks, not event details.</small></span></label>
+        <label class="schedule-toggle"><input type="checkbox" id="profileShareSchedule" checked /><span><strong>Share my availability with my groups</strong><small>Groups see when you're busy, not what. What friends see is set under Who sees what.</small></span></label>
         <button class="primary-button full" type="submit">Save profile</button>
         <button class="outline-button full" id="openAccountFromProfile" type="button">Account and sign-in</button>
       </form>

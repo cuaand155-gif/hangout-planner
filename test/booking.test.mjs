@@ -4,12 +4,14 @@ import {
   DEFAULT_SETTINGS,
   buildGuestIcs,
   buildOwnerFeed,
+  busyForBooking,
   busyFromIcsBlocks,
   candidateSlots,
   normalizeBookingSettings,
   normalizeGuest,
   normalizeHandle,
   openSlots,
+  sameBusy,
   stampToDate,
   zonedParts,
   zonedToUtc,
@@ -119,4 +121,44 @@ test("owner links: share page, webcal feed and Google subscribe link", async () 
   const handle = suggestHandle("Alexi Cüa!", () => (i++ % 10) / 10);
   assert.match(handle, /^alexi-cua-[a-z0-9]{5}$/);
   assert.match(suggestHandle(""), /^me-[a-z0-9]{5}$/);
+});
+
+test("the owner's calendar becomes bare, merged busy ranges for the booking page", () => {
+  const now = new Date("2026-09-28T12:00:00Z");
+  const events = [
+    { start: "2026-09-28T15:00:00Z", end: "2026-09-28T16:00:00Z", title: "Therapy", location: "Clinic" },
+    { start: "2026-09-28T15:30:00Z", end: "2026-09-28T17:00:00Z", title: "Soccer" }, // overlaps: merged
+    { start: "2026-09-28T11:00:00Z", end: "2026-09-28T13:00:00Z", title: "Running now" }, // kept whole
+    { start: "2026-09-28T09:00:00Z", end: "2026-09-28T10:00:00Z", title: "Already over" },
+    { start: "2026-09-29T00:00:00Z", end: "2026-09-30T00:00:00Z", allDay: true, title: "Holiday" },
+    { start: "2026-11-20T15:00:00Z", end: "2026-11-20T16:00:00Z", title: "Past the window" },
+    { start: "garbage", end: "2026-09-28T18:00:00Z" },
+  ];
+  const busy = busyForBooking(events, { now, windowDays: 14 });
+  assert.deepEqual(busy, [
+    { start: "2026-09-28T11:00:00.000Z", end: "2026-09-28T13:00:00.000Z" },
+    { start: "2026-09-28T15:00:00.000Z", end: "2026-09-28T17:00:00.000Z" },
+  ]);
+  assert.ok(!JSON.stringify(busy).includes("Therapy"), "names never leave");
+  // A minute later nothing moves, so an unchanged calendar is not re-saved.
+  assert.deepEqual(busyForBooking(events, { now: new Date(now.getTime() + 60_000), windowDays: 14 }), busy);
+  // And the page then keeps those times closed.
+  const open = openSlots({ duration: 60, windowDays: 1, dayStart: 9, dayEnd: 17, weekdays: [1], noticeHours: 0, timeZone: TZ }, { busy, now });
+  assert.ok(open.every((slot) => slot.start >= "2026-09-28T17:00:00.000Z" || slot.end <= "2026-09-28T15:00:00.000Z"));
+  assert.ok(!open.some((slot) => slot.start < "2026-09-28T13:00:00.000Z"));
+});
+
+test("using the calendars is on unless the owner turned it off", () => {
+  assert.equal(normalizeBookingSettings({}).useCalendars, true);
+  assert.equal(normalizeBookingSettings({ useCalendars: false }).useCalendars, false);
+  assert.equal(normalizeBookingSettings({ useCalendars: "no" }).useCalendars, true);
+});
+
+test("stored busy times match however the database orders their keys", () => {
+  const fresh = [{ start: "2026-09-28T15:00:00.000Z", end: "2026-09-28T17:00:00.000Z" }];
+  // jsonb puts shorter keys first, and may drop the milliseconds.
+  assert.ok(sameBusy(fresh, [{ end: "2026-09-28T17:00:00Z", start: "2026-09-28T15:00:00Z" }]));
+  assert.ok(!sameBusy(fresh, [{ end: "2026-09-28T18:00:00Z", start: "2026-09-28T15:00:00Z" }]));
+  assert.ok(!sameBusy(fresh, []));
+  assert.ok(sameBusy([], null), "a page with nothing stored matches an empty calendar");
 });

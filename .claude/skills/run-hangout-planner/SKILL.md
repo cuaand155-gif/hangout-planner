@@ -65,6 +65,7 @@ Each line prints `ok  <command>` or `ERR <command>` followed by the reason. Scre
 **`--signed-in` in detail.** The fake is an in-memory database with you ("Alexi"), an accepted friend "Sam Rivera" who has "free now" turned on, and shares from Sam.
 - It seeds two of your own events today (Therapy 9–10, Soccer 18–20), so My calendar, the named event blocks on the week grid, Who sees what, the booking dialog (save returns the row), Friends and the Free now strip all work.
 - Edit `fake-supabase.js` to add tables or RPC answers.
+- To start with a saved booking link, seed it before a second `nav`: `eval localStorage.setItem('fake-seed', JSON.stringify({booking_pages:[{id:'p1', owner_id:'11111111-1111-1111-1111-111111111111', handle:'alexi', title:'Coffee chat', owner_name:'Alexi', settings:{}, busy:[], ics_urls:[], active:true, feed_token:'f'.repeat(32)}]}))`. Then `calls` shows the app keeping that page's `busy` in step with your calendars.
 
 Useful selectors:
 
@@ -82,7 +83,7 @@ Useful selectors:
 ## Test
 
 ```bash
-npm test     # node --test "test/*.test.mjs"; 206 passing
+npm test     # node --test "test/*.test.mjs"; 208 passing
 ```
 
 Tests cover the API handlers with a fake PostgREST, the pure logic in `lib/` (booking, sharing, hangout, ics, …), and the offline-shell list in `sw.js`. Database policies are checked separately by `supabase/rls-shares-test.sql`, run in a rolled-back transaction against a real project.

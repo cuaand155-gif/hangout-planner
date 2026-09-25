@@ -3,7 +3,7 @@
 // with the signed-in user's own token, so row level security decides what is
 // visible (see supabase/schema.sql); visitors use /api/book instead.
 
-import { BUFFERS, DURATIONS, bookingLinks, normalizeBookingSettings, normalizeHandle, suggestHandle } from "./lib/booking.js";
+import { BUFFERS, DURATIONS, bookingLinks, busyForBooking, normalizeBookingSettings, normalizeHandle, sameBusy, suggestHandle } from "./lib/booking.js";
 
 const $ = (id) => document.getElementById(id);
 const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -15,15 +15,24 @@ const whenLabel = new Intl.DateTimeFormat(undefined, { weekday: "short", month: 
 const timeOnly = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 // New rows get updated_at from the database default; owners may not set it on insert.
 const withoutUpdatedAt = ({ updated_at: _ignored, ...rest }) => rest;
+const PAGE_COLUMNS = "id,handle,title,owner_name,settings,busy,ics_urls,active,feed_token";
+/** Whether a saved page blocks calendar busy times (no page yet: the default, on). */
+function usesCalendars(page) {
+  if (!page) return true;
+  const raw = page.settings && typeof page.settings === "object" ? page.settings : {};
+  // Pages saved before the setting existed only kept calendar links when it was on.
+  return "useCalendars" in raw ? raw.useCalendars !== false : (page.ics_urls || []).length > 0;
+}
 const options = (values, label, selected) =>
   values.map((value) => `<option value="${value}"${Number(value) === Number(selected) ? " selected" : ""}>${label(value)}</option>`).join("");
 
 /**
  * Wires the booking dialog. `app` supplies what lives in app.js:
- * { supabase, user(), displayName(), calendarLinks(), showToast, openDialog, openAccount, svgIcon, escapeHtml }
+ * { supabase, user(), displayName(), calendarLinks(), calendarEvents(), hasCalendars(), showToast, openDialog, openAccount, svgIcon, escapeHtml }
  */
 export function initBookingOwner(app) {
   const dialog = $("bookingDialog");
+  // page: the owner's row once read (false: read, and there is none).
   const state = { page: null, picked: [], loading: false };
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
@@ -67,16 +76,32 @@ export function initBookingOwner(app) {
     $("bookingBuffer").innerHTML = options(BUFFERS, (value) => (value ? `${value} min` : "None"), settings.buffer);
     $("bookingNotice").innerHTML = options(NOTICE, (value) => (value ? `${value} hour${value === 1 ? "" : "s"} from now` : "Any time"), settings.noticeHours);
     $("bookingWindow").innerHTML = options(WINDOWS, (value) => `${value} days`, settings.windowDays);
-    $("bookingUseCalendars").checked = page ? (page.ics_urls || []).length > 0 || !page.id : true;
+    $("bookingUseCalendars").checked = usesCalendars(page);
     $("bookingActive").checked = page ? page.active !== false : true;
     $("bookingZone").textContent = (page ? settings.timeZone : zone).replace(/_/g, " ");
     state.picked = settings.picked;
     renderMode();
     renderPicked();
+    renderCalendarsNote();
+  }
+
+  function renderCalendarsNote() {
     const links = app.calendarLinks();
-    $("bookingCalendarsNote").textContent = links.length
-      ? `Uses your ${links.length} calendar link${links.length === 1 ? "" : "s"}, checked by the server so it stays fresh even while Waddle is closed. Only you can see these links.`
-      : "You haven't added a calendar link yet (sidebar → Calendar links). Until you do, only your hours and existing bookings count.";
+    const parts = [];
+    if (links.length) {
+      parts.push(`Your ${links.length} calendar link${links.length === 1 ? " is" : "s are"} checked by the server, so ${links.length === 1 ? "it stays" : "they stay"} fresh even while Waddle is closed.`);
+    }
+    if (app.hasCalendars()) {
+      parts.push("Busy times from every calendar you've connected are saved to the link too (times only, never names), and refresh whenever you open Waddle.");
+    }
+    $("bookingCalendarsNote").textContent = parts.length
+      ? parts.join(" ")
+      : "You haven't connected a calendar yet (sidebar → Calendar links). Until you do, only your hours and existing bookings count.";
+  }
+
+  /** Busy times to store with the page: none when the owner turned calendars off. */
+  function busyFor(settings) {
+    return settings.useCalendars ? busyForBooking(app.calendarEvents(), { windowDays: settings.windowDays }) : [];
   }
 
   function renderShare(page) {
@@ -129,11 +154,11 @@ export function initBookingOwner(app) {
     }
     const { data, error } = await app.supabase
       .from("booking_pages")
-      .select("id,handle,title,owner_name,settings,ics_urls,active,feed_token")
+      .select(PAGE_COLUMNS)
       .eq("owner_id", user.id)
       .maybeSingle();
     if (error) app.showToast("Could not load your booking link.");
-    state.page = data || null;
+    state.page = data || (error ? null : false);
     fillForm(state.page);
     renderShare(state.page);
     loadBookings();
@@ -142,13 +167,8 @@ export function initBookingOwner(app) {
   function readForm() {
     const mode = document.querySelector('input[name="bookingMode"]:checked')?.value || "free";
     const weekdays = [...$("bookingWeekdays").querySelectorAll("input:checked")].map((input) => Number(input.value));
-    return {
-      handle: normalizeHandle($("bookingHandle").value),
-      title: $("bookingPageTitle").value.trim().slice(0, 80) || "Book a time",
-      owner_name: $("bookingOwnerName").value.trim().slice(0, 60),
-      active: $("bookingActive").checked,
-      ics_urls: $("bookingUseCalendars").checked ? app.calendarLinks().slice(0, 3) : [],
-      settings: normalizeBookingSettings({
+    const useCalendars = $("bookingUseCalendars").checked;
+    const settings = normalizeBookingSettings({
         mode,
         weekdays,
         dayStart: Number($("bookingDayStart").value),
@@ -159,7 +179,17 @@ export function initBookingOwner(app) {
         windowDays: Number($("bookingWindow").value),
         timeZone: state.page ? normalizeBookingSettings(state.page.settings).timeZone : zone,
         picked: state.picked,
-      }),
+        useCalendars,
+      });
+    return {
+      handle: normalizeHandle($("bookingHandle").value),
+      title: $("bookingPageTitle").value.trim().slice(0, 80) || "Book a time",
+      owner_name: $("bookingOwnerName").value.trim().slice(0, 60),
+      active: $("bookingActive").checked,
+      ics_urls: useCalendars ? app.calendarLinks().slice(0, 3) : [],
+      busy: busyFor(settings),
+      busy_synced_at: new Date().toISOString(),
+      settings,
       updated_at: new Date().toISOString(),
     };
   }
@@ -175,7 +205,7 @@ export function initBookingOwner(app) {
     const query = state.page
       ? app.supabase.from("booking_pages").update(values).eq("id", state.page.id)
       : app.supabase.from("booking_pages").insert({ ...withoutUpdatedAt(values), owner_id: app.user().id });
-    const { data, error } = await query.select("id,handle,title,owner_name,settings,ics_urls,active,feed_token").single();
+    const { data, error } = await query.select(PAGE_COLUMNS).single();
     button.disabled = false;
     if (error) {
       return app.showToast(error.code === "23505" ? "That link name is taken — try another." : "Could not save your booking link.");
@@ -243,6 +273,40 @@ export function initBookingOwner(app) {
     load();
   });
 
-  return { reload: () => (dialog.open ? load() : undefined) };
+  /**
+   * Keeps the page's busy times in step with the owner's calendars, so a guest
+   * cannot book over an event from a calendar the server cannot read itself
+   * (Google, or links past the first three). Writes only when they changed.
+   */
+  async function publishBusy() {
+    const user = app.user();
+    if (!user || !app.supabase || state.loading) return;
+    if (state.page === null) {
+      state.loading = true;
+      const { data, error } = await app.supabase.from("booking_pages").select(PAGE_COLUMNS).eq("owner_id", user.id).maybeSingle();
+      state.loading = false;
+      if (error) return;
+      state.page = data || false;
+    }
+    const page = state.page;
+    if (!page) return;
+    const busy = busyFor(normalizeBookingSettings({ ...page.settings, useCalendars: usesCalendars(page) }));
+    if (sameBusy(busy, page.busy)) return;
+    const { error } = await app.supabase
+      .from("booking_pages")
+      .update({ busy, busy_synced_at: new Date().toISOString() })
+      .eq("id", page.id);
+    if (error) return console.warn("Booking link busy times not synced:", error.message);
+    page.busy = busy;
+  }
+
+  return {
+    reload: () => {
+      // A different account (or none) means a different page.
+      state.page = null;
+      return dialog.open ? load() : undefined;
+    },
+    publishBusy,
+  };
 }
 

@@ -3,14 +3,15 @@
   const ME = "11111111-1111-1111-1111-111111111111";
   const SAM = "22222222-2222-2222-2222-222222222222";
   const now = Date.now();
-  const seed = window.__seed || {};
+  // Extra rows can be seeded before a page load: localStorage "fake-seed" = {"booking_pages": [...]}.
+  const seed = window.__seed || JSON.parse(localStorage.getItem("fake-seed") || "{}");
   const db = {
     friend_requests: [{ id: "fr1", requester_id: ME, recipient_id: SAM, recipient_email: "sam@example.com", status: "accepted" }],
     profiles: [{ id: SAM, display_name: "Sam Rivera", photo_url: "" }, { id: ME, display_name: "Alexi", photo_url: "" }],
     sharing_settings: seed.sharing_settings || [],
     presence: [{ user_id: SAM, until: new Date(now + 2 * 3600e3).toISOString(), note: "up for coffee" }],
     calendar_shares: [],
-    booking_pages: [],
+    booking_pages: seed.booking_pages || [],
     bookings: [],
     workspaces: [],
   };
