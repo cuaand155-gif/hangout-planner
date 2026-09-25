@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "node scripts/dev-server.mjs",
-    "test": "node --test \"test/*.test.mjs\""
+    "test": "node --test \"test/*.test.mjs\"",
+    "test:e2e": "node --test --test-concurrency=1 \"test/e2e/*.e2e.mjs\""
   }
 }

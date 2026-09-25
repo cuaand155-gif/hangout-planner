@@ -3,7 +3,7 @@ name: run-hangout-planner
 description: Run, start, screenshot and drive Waddle (the hangout-planner web app) locally in headless Chromium, including signed-in friend and sharing features with a fake Supabase. Use when asked to run the app, take a screenshot of it, click through a flow, check a UI change, or run its tests.
 ---
 
-Waddle is a no-build vanilla-JS web app (`index.html` + `app.js`, public booking page `book.html`) with Vercel-style API handlers in `api/`. Locally, `scripts/dev-server.mjs` serves both. Drive it with `.claude/skills/run-hangout-planner/driver.mjs`, a Playwright script that reads one command per line from stdin. All paths are relative to the repo root.
+Waddle is a no-build vanilla-JS web app (`index.html` + `app.js`, public booking page `book.html`) with Vercel-style API handlers in `api/`. Locally, `scripts/dev-server.mjs` serves both. Drive it with `.claude/skills/run-hangout-planner/driver.mjs`, a Playwright script that reads one command per line from stdin. For a repeatable check of the main flows, run the browser suite (`npm run test:e2e`, see Test). Both share their browser setup (stubs, seeded storage, error collection) through `session.mjs` in this folder. All paths are relative to the repo root.
 
 ## Prerequisites
 
@@ -20,7 +20,7 @@ Stop it: `fuser -k 4173/tcp`. Never use `pkill -f node`: it matches the agent's 
 
 Without `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` the server runs in demo mode:
 - `/api/workspace` serves the sample "Weekend crew" group and saves nothing.
-- `/api/book` answers 503 "Booking links are not set up on this server yet."
+- `/api/book` answers 503 "Booking links are not set up on this server yet." (the owner's Cancel button then cancels straight in the database, so it still works with `--signed-in`).
 
 ## Run (agent path): the driver
 
@@ -65,7 +65,7 @@ Each line prints `ok  <command>` or `ERR <command>` followed by the reason. Scre
 **`--signed-in` in detail.** The fake is an in-memory database with you ("Alexi"), an accepted friend "Sam Rivera" who has "free now" turned on, and shares from Sam.
 - It seeds two of your own events today (Therapy 9–10, Soccer 18–20), so My calendar, the named event blocks on the week grid, Who sees what, the booking dialog (save returns the row), Friends and the Free now strip all work.
 - Edit `fake-supabase.js` to add tables or RPC answers.
-- To start with a saved booking link, seed it before a second `nav`: `eval localStorage.setItem('fake-seed', JSON.stringify({booking_pages:[{id:'p1', owner_id:'11111111-1111-1111-1111-111111111111', handle:'alexi', title:'Coffee chat', owner_name:'Alexi', settings:{}, busy:[], ics_urls:[], active:true, feed_token:'f'.repeat(32)}]}))`. Then `calls` shows the app keeping that page's `busy` in step with your calendars.
+- To start with a saved booking link, seed it before a second `nav`: `eval localStorage.setItem('fake-seed', JSON.stringify({booking_pages:[{id:'p1', owner_id:'11111111-1111-1111-1111-111111111111', handle:'alexi', title:'Coffee chat', owner_name:'Alexi', settings:{}, busy:[], ics_urls:[], active:true, feed_token:'f'.repeat(32)}]}))`. Then `calls` shows the app keeping that page's `busy` in step with your calendars. Add `bookings:[{id, page_id:'p1', start_at, end_at, guest_name, guest_email, note:'', status:'confirmed'}]` to the same seed to get upcoming bookings with Cancel buttons (`[data-cancel-booking]`; the confirm prompt needs accepting).
 
 Useful selectors:
 
@@ -83,10 +83,13 @@ Useful selectors:
 ## Test
 
 ```bash
-npm test     # node --test "test/*.test.mjs"; 208 passing
+npm test          # node --test "test/*.test.mjs"; 223 passing, about 5 s
+npm run test:e2e  # node --test "test/e2e/*.e2e.mjs"; 13 browser tests, about 25 s
 ```
 
-Tests cover the API handlers with a fake PostgREST, the pure logic in `lib/` (booking, sharing, hangout, ics, …), and the offline-shell list in `sw.js`. Database policies are checked separately by `supabase/rls-shares-test.sql`, run in a rolled-back transaction against a real project.
+`npm test` covers the API handlers with a faked `fetch` (PostgREST, Supabase auth, Google, Resend: nothing real is called and no email is ever sent), the pure logic in `lib/` (booking, sharing, hangout, ics, …), and the offline-shell list in `sw.js`. `test/book-services.test.mjs` covers the booking page's Google freeBusy check and the booking emails. Database policies are checked separately by `supabase/rls-shares-test.sql`, run in a rolled-back transaction against a real project.
+
+`npm run test:e2e` starts its own dev server on a free port (no need to start or stop one yourself), runs `test/e2e/app.e2e.mjs` in headless Chromium and stops the server. It covers the flows above: group view, plan → vote → pick → RSVP, painting My availability, Google connect via `?calendar=1` and disconnect, the `--google-server` sync, Who sees what, Free now, a public booking page (book and cancel, against a stubbed `/api/book`), the owner cancelling a booking, and phone and dark-theme smoke tests. Every test fails on page errors. Without Playwright (at `PLAYWRIGHT_PATH`, default `/opt/node22/lib/node_modules/playwright/index.mjs`) every test is skipped with a message. To add a flow, use `browserTest(name, { signedIn, googleServer, groupEvents, phone, theme }, async ({ page, context, go, google }) => …)` in that file; `openSession` in `session.mjs` takes the same options as the driver's flags.
 
 ## Gotchas
 

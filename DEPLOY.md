@@ -117,7 +117,15 @@ again. To keep syncing going:
 
 After that, **Connect** hands Google's refresh token to `api/google.js`, which
 stores it encrypted (AES-256-GCM, key derived from the client secret) and uses
-it to fetch events. Only title, place and times leave the server. Removing the
+it to fetch events. Only title, place and times leave the server.
+
+The same stored token keeps booking links current while Waddle is closed: when
+a guest opens your booking page, `api/book.js` asks Google's freeBusy endpoint
+for your primary calendar's busy times over the booking window (times only,
+never titles) and closes those slots too, as long as **Keep my calendar's busy
+times blocked** is on. If Google is slow (over four seconds), errors, or you
+never connected, the page quietly uses what it already had: your calendar
+links and the busy times the app last saved. Removing the
 Google calendar in the app deletes the stored token; so does Google revoking
 access. Changing the client secret makes stored tokens unreadable, so everyone
 connects once more.
@@ -128,6 +136,41 @@ direct browser requests. That handler only follows `https`, re-checks every
 redirect, and refuses hosts that resolve to private or loopback addresses so
 the URL box cannot be used to probe your own network.
 
+## 5. Booking emails (optional)
+
+Off until you set it up. Without it nobody is emailed: guests get their cancel
+link on screen, the booking page says so, and you tell guests yourself when you
+cancel. With it, `api/book.js` sends, through [Resend](https://resend.com)'s
+HTTP API:
+
+- the guest a confirmation with their cancel link;
+- you a "new booking" notice (to the email you sign in with), with the guest's
+  note; replying goes to the guest;
+- both of you a note when either side cancels.
+
+An email that fails is logged and skipped; the booking still goes through.
+Guest emails only carry what you wrote (page title, your name) plus the time
+and link, never text the guest typed, and one address can book a page at most
+ten times a day, so the form can't be used to send mail to strangers. Your
+address is never shown to guests.
+
+1. Create a Resend account (the free tier covers a personal booking link).
+2. **Resend → Domains → Add domain**, add the DNS records it shows at your
+   domain's DNS host, and wait until the domain shows **Verified**. Resend only
+   sends from verified domains.
+3. **Resend → API Keys → Create API key** with **Sending access**.
+4. In Vercel → Settings → Environment Variables add:
+   - `RESEND_API_KEY`: the key from step 3.
+   - `BOOKING_EMAIL_FROM`: the sender, on the verified domain, e.g.
+     `Waddle <bookings@yourdomain.com>`.
+5. Redeploy.
+
+Links in the emails point at your production domain, which Vercel exposes to
+the functions as `VERCEL_PROJECT_PRODUCTION_URL`. On another host, or to use a
+different address, also set `SITE_URL` (e.g. `https://waddle.yourdomain.com`).
+With no site address the emails stay off, because a link built from an
+incoming request's Host header could be pointed anywhere.
+
 ## Hosting
 
 ### Vercel
@@ -136,7 +179,7 @@ the URL box cannot be used to probe your own network.
 2. Leave **Framework Preset** as **Other**, and leave **Build Command** and
    **Output Directory** blank.
 3. Add the two environment variables from step 1 (and, optionally, the two
-   Google ones from step 4).
+   Google ones from step 4 and the two email ones from step 5).
 4. Deploy. `vercel.json` enables clean URLs and serves `/book/<handle>` from
    `book.html`; `api/*.js` become serverless functions automatically.
 
@@ -157,8 +200,9 @@ links. Choose **Deploy from a branch** and the `/ (root)` folder.
 ## Local preview
 
 ```bash
-npm run dev     # http://localhost:4173, static files plus the /api handlers
-npm test        # unit and API tests
+npm run dev       # http://localhost:4173, static files plus the /api handlers
+npm test          # unit and API tests
+npm run test:e2e  # browser tests (needs Playwright; skipped if it isn't installed)
 ```
 
 `npm run dev` picks up `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from the

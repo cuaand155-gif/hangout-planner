@@ -1690,10 +1690,12 @@ for (const button of document.querySelectorAll(".close-dialog")) {
 const bookingOwner = initBookingOwner({
   supabase: supabaseClient,
   user: () => ui.user,
+  accessToken: () => accessToken(),
   displayName: () => displayName(),
   calendarLinks: () => calendarSources.map((source) => source.url).filter((url) => /^(https|webcal):\/\//i.test(String(url || ""))),
   calendarEvents: () => allMyEvents(),
   hasCalendars: () => calendarSources.length > 0 || allMyEvents().length > 0,
+  googleOnServer: () => googleServer.configured && googleServer.connected,
   showToast: (message) => showToast(message),
   openDialog: (dialog) => openDialog(dialog),
   openAccount: () => openDialog(dialogs.account),

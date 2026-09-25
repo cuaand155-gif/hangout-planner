@@ -89,6 +89,10 @@ function renderPage() {
   $("bookingOwner").textContent = page.ownerName || "";
   $("bookingTitle").textContent = page.title;
   $("bookingMeta").textContent = `${page.duration} min · times shown in your time zone (${visitorZone.replace(/_/g, " ")})`;
+  // Only promise an email when this server actually sends them.
+  $("guestEmailHint").textContent = page.emails
+    ? "Only they see it. We'll email you a confirmation with a cancel link."
+    : "Only they see it. This host hasn't set up email, so nothing is emailed — you'll get your cancel link on the next screen.";
   renderDays();
   show("bookingPicker");
 }
@@ -139,7 +143,7 @@ function googleUrl(booking, page) {
   return `https://calendar.google.com/calendar/render?${query}`;
 }
 
-function showDone(booking, page) {
+function showDone(booking, page, emailed) {
   const start = new Date(booking.start);
   $("doneTitle").textContent = "You're booked.";
   $("doneWhen").textContent = `${longDate.format(start)}, ${timeLabel.format(start)} – ${timeLabel.format(new Date(booking.end))} with ${page.ownerName || "your host"}.`;
@@ -155,7 +159,9 @@ function showDone(booking, page) {
     link.click();
     URL.revokeObjectURL(link.href);
   };
-  $("doneCancelHint").innerHTML = `Plans changed? <a href="${cancelUrl(booking.cancelToken)}">Cancel this booking</a>. Keep this link — it's the only way to cancel.`;
+  $("doneCancelHint").innerHTML = emailed
+    ? `We emailed you a confirmation with this cancel link too. Plans changed? <a href="${cancelUrl(booking.cancelToken)}">Cancel this booking</a>.`
+    : `Plans changed? <a href="${cancelUrl(booking.cancelToken)}">Cancel this booking</a>. Keep this link — it's the only way to cancel, and no confirmation email is coming.`;
   show("bookingDone");
 }
 
@@ -177,11 +183,12 @@ $("bookingForm").addEventListener("submit", async (event) => {
       email: $("guestEmail").value,
       note: $("guestNote").value,
       website: $("guestWebsite").value,
+      timeZone: visitorZone,
     }),
   });
   button.disabled = false;
   button.textContent = "Confirm booking";
-  if (result.ok) return showDone(result.body.booking, result.body.page);
+  if (result.ok) return showDone(result.body.booking, result.body.page, result.body.emailed === true);
   if (result.status === 409 && Array.isArray(result.body.slots)) {
     state.slots = result.body.slots;
     renderDays();
@@ -203,10 +210,11 @@ async function confirmCancel() {
   const result = await api({
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "cancel", token: cancelToken }),
+    body: JSON.stringify({ action: "cancel", token: cancelToken, timeZone: visitorZone }),
   });
   if (!result.ok) return message("Couldn't cancel.", result.body.error || "Try again in a moment.");
-  message("Cancelled.", "The time is free again. If you added it to your calendar, you can delete it there.", `<a class="outline-button" href="/book/${encodeURIComponent(handle)}">Book another time</a>`);
+  const told = result.body.emailed === true ? "We've emailed you both. " : "";
+  message("Cancelled.", `${told}The time is free again. If you added it to your calendar, you can delete it there.`, `<a class="outline-button" href="/book/${encodeURIComponent(handle)}">Book another time</a>`);
 }
 
 async function loadCancel() {
