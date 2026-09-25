@@ -340,6 +340,29 @@ describe("my availability", () => {
   });
 });
 
+describe("group calendar", () => {
+  browserTest("shows shared names and places only when the group allows event details", { signedIn: true, groupEvents: true }, async ({ page, go }) => {
+    await go("/");
+    await page.locator("#groupCalGrid .gc-event").first().waitFor({ state: "attached" });
+    const names = async () => page.$$eval("#groupCalGrid .gc-event", (list) => list.map((item) => item.innerText));
+    const withDetails = await names();
+    assert.ok(withDetails.some((text) => text.includes("Lunch") && text.includes("Kensington Market")), "a friend's shared event shows its name and place");
+    await page.evaluate(() => {
+      const key = "gatherly-workspace:weekend-crew";
+      const workspace = JSON.parse(localStorage.getItem(key));
+      workspace.privacy = "busy";
+      localStorage.setItem(key, JSON.stringify(workspace));
+    });
+    await go("/");
+    await page.locator("#groupCalGrid .gc-event").first().waitFor({ state: "attached" });
+    const busyOnly = (await names()).join(" ");
+    for (const hidden of ["Lunch", "Kensington Market", "Climbing", "Basecamp", "Dentist", "Bloor St"]) {
+      assert.ok(!busyOnly.includes(hidden), `"${hidden}" stays hidden in a busy-only group`);
+    }
+    assert.ok(busyOnly.includes("Therapy"), "your own events still show to you");
+  });
+});
+
 describe("layout", () => {
   const overlaps = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 

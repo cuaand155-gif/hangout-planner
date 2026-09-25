@@ -31,6 +31,7 @@
           <a class="nav-item active" href="#overview"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-house"/></svg></span>Overview</a>
           <a class="nav-item" href="#availability"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg></span>Availability</a>
           <a class="nav-item" href="#mycalendar"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg></span>My calendar</a>
+          <a class="nav-item" href="#groupcalendar"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-groups"/></svg></span>Group calendar</a>
           <a class="nav-item" href="#ideas"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-sparkle"/></svg></span>Activity ideas</a>
         </nav>
         <div class="sidebar-bottom">
@@ -191,6 +192,23 @@
             <div class="mine-actions" id="mineActions" hidden>
               <button class="outline-button" id="saveUsualWeek">Save as my usual week</button>
               <button class="outline-button" id="clearMyWeek">I’m free all week</button>
+            </div>
+          </section>
+
+          <section class="groupcal-section" id="groupcalendar">
+            <div class="section-heading">
+              <div><p class="eyebrow">THE WHOLE CREW</p><h2>What’s everyone up to?</h2><p>The group’s week at a glance. Event names show only when someone chooses to share them — otherwise you’ll just see when they’re busy.</p></div>
+              <div class="week-switcher">
+                <button id="groupCalPrevWeek" aria-label="Previous week">‹</button>
+                <strong id="groupCalWeekLabel">This week</strong>
+                <button id="groupCalNextWeek" aria-label="Next week">›</button>
+                <button class="text-button" id="groupCalThisWeek" hidden>Today</button>
+              </div>
+            </div>
+            <div class="groupcal-card">
+              <div class="groupcal-scroll">
+                <div class="groupcal-grid" id="groupCalGrid" role="grid" aria-label="Group calendar"></div>
+              </div>
             </div>
           </section>
 
