@@ -58,7 +58,8 @@ Each line prints `ok  <command>` or `ERR <command>` followed by the reason. Scre
 **Flags:**
 - `--phone` gives an iPhone 13 viewport, where the sidebar moves behind `#mobileMenu`.
 - `--theme dark` switches to the dark theme.
-- `--signed-in` replaces supabase-js with `fake-supabase.js` (see below).
+- `--signed-in` replaces supabase-js with `fake-supabase.js` (see below). It also answers Google Calendar's events API with two events tomorrow: `nav /?calendar=1` runs the "back from Connect Google Calendar" path (keeps the token, syncs).
+- `--group-events` seeds the demo group so Jamie and Taylor share named events with places, and the group allows event details. The group view then shows name · person · place blocks.
 
 **`--signed-in` in detail.** The fake is an in-memory database with you ("Alexi"), an accepted friend "Sam Rivera" who has "free now" turned on, and shares from Sam.
 - It seeds two of your own events today (Therapy 9–10, Soccer 18–20), so My calendar, the named event blocks on the week grid, Who sees what, the booking dialog (save returns the row), Friends and the Free now strip all work.
@@ -92,7 +93,7 @@ Tests cover the API handlers with a fake PostgREST, the pure logic in `lib/` (bo
 - **`open <dialog>` skips the app's fill step.** For example, Settings shows an empty group name and "Shortest window". To see a dialog as users do, click its real button (`#settingsButton`, `#bookingButton`, `#sharingButton` …).
 - **With `--phone` the sidebar is off-screen.** `click #calendarButton` times out until you `click #mobileMenu` first.
 - **Theme switches animate** (view transition), so `wait 600` before reading `document.documentElement.dataset.theme`.
-- **Event blocks on the week grid (`.event-chip`) are positioned from the laid-out cells**, and are re-drawn when the grid resizes. They're `pointer-events:none`, so painting busy hours still works underneath.
+- **Two layers on the week grid.** On the group view, `.event-chip` shows name · person · place for events people share, plus your own. On My availability, `.busy-block` shows your calendar events as plain busy blocks. Both are positioned from the laid-out cells, and are re-drawn when the grid resizes. They're `pointer-events:none`, so painting busy hours still works underneath.
 - **RSVP and calendar-add controls stay hidden until a time is picked:** click a `.time-option [data-window]` first.
 - **The sign-in gate for groups only happens with a database.** In demo mode `/?w=anything` opens normally. To see the gate, stub `/api/workspace` to return `401 {"signIn":true}` (Playwright `page.route`).
 - **External requests fail in this sandbox.** The driver aborts Google Fonts (so the fallback serif and sans fonts render) and hides `ERR_FAILED` / `ERR_TUNNEL_CONNECTION_FAILED` noise. Without `--signed-in`, the Supabase CDN script fails too, so auth buttons toast "Google sign-in needs provider credentials first."

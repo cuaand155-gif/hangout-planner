@@ -1,6 +1,9 @@
 // Drives Waddle in headless Chromium. Reads one command per line from stdin.
 //
-//   node .claude/skills/run-hangout-planner/driver.mjs [--signed-in] [--theme dark] [--phone] [--base URL] < script
+//   node .claude/skills/run-hangout-planner/driver.mjs [--signed-in] [--group-events] [--theme dark] [--phone] [--base URL] < script
+//
+// --group-events seeds the (demo-mode) group so Jamie and Taylor share named
+// events with places, and the group shows event details.
 //
 // --signed-in swaps supabase-js for fake-supabase.js (an in-memory database
 // with you, a friend "Sam Rivera" and his "free now" status) and seeds two of
@@ -36,12 +39,53 @@ await context.route(/fonts\.(googleapis|gstatic)\.com/, (route) => route.abort()
 if (flag("--signed-in")) {
   const fake = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "fake-supabase.js"), "utf8");
   await context.route("https://cdn.jsdelivr.net/npm/@supabase/**", (route) => route.fulfill({ contentType: "text/javascript", body: fake }));
+  // Google Calendar's events API, answered with two events tomorrow (nav /?calendar=1 to connect).
+  await context.route("https://www.googleapis.com/calendar/v3/**", (route) => {
+    const at = (hour) => {
+      const date = new Date();
+      date.setDate(date.getDate() + 1);
+      date.setHours(hour, 0, 0, 0);
+      return date.toISOString();
+    };
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ items: [
+        { status: "confirmed", summary: "Team standup", location: "Zoom", start: { dateTime: at(10) }, end: { dateTime: at(11) } },
+        { status: "confirmed", summary: "Dinner with Mo", location: "Pai, Duncan St", start: { dateTime: at(19) }, end: { dateTime: at(21) } },
+      ] }),
+    });
+  });
 }
 
-await context.addInitScript(({ theme, signedIn }) => {
+await context.addInitScript(({ theme, signedIn, groupEvents }) => {
   if (sessionStorage.getItem("driver-seeded")) return;
   sessionStorage.setItem("driver-seeded", "1");
   localStorage.setItem("gatherly-appearance", theme);
+  if (groupEvents) {
+    // Demo mode keeps a cached group, so seed one whose members share named events.
+    const day = (offset, hour) => {
+      const date = new Date();
+      date.setDate(date.getDate() + offset);
+      date.setHours(hour, 0, 0, 0);
+      return date.toISOString();
+    };
+    const iso = (offset) => day(offset, 12).slice(0, 10);
+    const coverage = { from: iso(-7), to: iso(21) };
+    localStorage.setItem("gatherly-workspace:weekend-crew", JSON.stringify({
+      name: "Weekend crew",
+      privacy: "details",
+      members: [
+        { id: "m_jamie", name: "Jamie Miller", coverage, busy: [
+          { start: day(0, 12), end: day(0, 13), title: "Lunch", location: "Kensington Market", source: "ics" },
+          { start: day(1, 15), end: day(1, 17), title: "Climbing", location: "Basecamp", source: "ics" },
+          { start: day(1, 19), end: day(1, 20), source: "ics" },
+        ] },
+        { id: "m_taylor", name: "Taylor Kim", coverage, busy: [
+          { start: day(0, 12), end: day(0, 14), title: "Dentist", location: "Bloor St", source: "google" },
+        ] },
+      ],
+    }));
+  }
   if (!signedIn) return;
   const at = (hour) => {
     const date = new Date();
@@ -51,9 +95,9 @@ await context.addInitScript(({ theme, signedIn }) => {
   const range = { from: new Date(Date.now() - 7 * 864e5).toISOString(), to: new Date(Date.now() + 21 * 864e5).toISOString() };
   localStorage.setItem(
     "gatherly-my-events",
-    JSON.stringify({ "ics:https://example.com/cal.ics": { ...range, events: [{ start: at(9), end: at(10), title: "Therapy" }, { start: at(18), end: at(20), title: "Soccer" }] } })
+    JSON.stringify({ "ics:https://example.com/cal.ics": { ...range, events: [{ start: at(9), end: at(10), title: "Therapy" }, { start: at(18), end: at(20), title: "Soccer", location: "Riverdale Park" }] } })
   );
-}, { theme, signedIn: flag("--signed-in") });
+}, { theme, signedIn: flag("--signed-in"), groupEvents: flag("--group-events") });
 
 const commands = {
   // nav <path>: open a page (add ?nosw to skip the service worker)
