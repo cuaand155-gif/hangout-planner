@@ -38,9 +38,13 @@ Status key: ✅ proven by an automated browser test · 🧪 proven by unit/API t
 | Feature | Where | Proven by | Status |
 |---|---|---|---|
 | Demo group loads with no errors | `app.js` | e2e "loads the demo group" | ✅ |
-| Opening a group needs sign-in (when the database is on) | `api/workspace.js` 401 gate | e2e "sign-in gate" (signed out: the gate, nothing loaded or saved; signed in: the group opens), with `/api/workspace` answering as it does with a database; `api`, `groups-api` tests | ✅ |
+| Opening a group needs sign-in or its invite link (when the database is on) | `api/workspace.js` 401 gate | e2e "sign-in gate" (signed out: the gate, nothing loaded or saved; signed in: the group opens), with `/api/workspace` answering as it does with a database; `api`, `groups-api` tests | ✅ |
 | Create, rename and switch between groups | "Your groups", `lib/groups.js`, `api/groups.js` | e2e "create a group, rename it, switch…"; `groups-api`, `groups-sync` tests | ✅ |
 | Invite link, add a placeholder person, remove someone | People dialog, `lib/membership.js` | e2e "invite link, a placeholder person, and removing people"; `membership` tests | ✅ |
+| Join from an invite link with just a name (guests): mark busy hours, vote on times and ideas, RSVP | Gate join card, `lib/guests.js`, `POST /api/workspace` guest actions | e2e "a guest joins with just a name, marks busy hours, votes on a time and RSVPs" (real API on the fake database); `guests` tests | ✅ |
+| Guests never see event names, places, emails or secrets, even when the group allows event details | `guestView` (server side) | e2e "a guest never sees event names or places…" (page text, storage and every API answer checked); `guests` tests | ✅ |
+| Owner turns the invite link off or makes a new one; removes a guest (votes go too) | People dialog `#inviteControls`, owner actions | e2e "turning the invite link off…", "the owner removes a guest, and their votes disappear"; `guests` API tests (only the owner may) | ✅ |
+| Guest writes are rate-limited (40 per 5 min per guest, 20 joins per hour per group) and size-capped (256 KB) | `countWrite`, `api/workspace.js` | `guests` API tests | 🧪 (server only, no screen) |
 | Friend requests (send, accept) | Friends tab, `lib/friends.js` | e2e "send a friend request, they accept it…" (two browsers); `friends` tests | ✅ |
 | Getting-started checklist for new groups | `lib/checklist.js` | e2e "getting-started checklist…"; `checklist` tests | ✅ |
 | Activity feed / bell | `#activityButton` | e2e "the bell shows a dot for news…" | ✅ |

@@ -3,11 +3,25 @@
 // the same way locally as it does deployed.
 //
 //   node scripts/dev-server.mjs [port]
+//
+// WADDLE_FAKE_DB=1 answers the handlers' database calls from an in-memory
+// fake (scripts/fake-supabase.mjs) instead of demo mode, so signed-in and
+// guest flows run end to end locally. GET /__fake-db shows its tables and
+// POST /__fake-db { tables } replaces them (browser tests use both). Nothing
+// real is ever called.
 
 import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+const FAKE_DB = process.env.WADDLE_FAKE_DB === "1";
+let fakeDb = null;
+if (FAKE_DB) {
+  const { createFakeSupabase, installFakeSupabase } = await import("./fake-supabase.mjs");
+  fakeDb = createFakeSupabase();
+  installFakeSupabase(fakeDb);
+}
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const PORT = Number(process.argv[2] || process.env.PORT || 4173);
@@ -99,6 +113,16 @@ const server = createServer(async (request, response) => {
   const url = new URL(request.url, `http://localhost:${PORT}`);
   const route = ROUTES[url.pathname];
 
+  if (fakeDb && url.pathname === "/__fake-db") {
+    if (request.method === "POST") {
+      const body = await readRequestBody(request);
+      fakeDb.reset(body?.tables || {});
+    }
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(JSON.stringify(fakeDb.db));
+    return;
+  }
+
   if (route) {
     try {
       const { default: handler } = await route();
@@ -130,5 +154,5 @@ const server = createServer(async (request, response) => {
 server.listen(PORT, () => {
   const configured = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
   console.log(`Waddle running at http://localhost:${PORT}`);
-  console.log(configured ? "Persistence: Supabase" : "Persistence: demo mode (no SUPABASE_* env vars set)");
+  console.log(FAKE_DB ? "Persistence: in-memory fake database (WADDLE_FAKE_DB=1)" : configured ? "Persistence: Supabase" : "Persistence: demo mode (no SUPABASE_* env vars set)");
 });

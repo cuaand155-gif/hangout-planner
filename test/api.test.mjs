@@ -120,7 +120,7 @@ test("the workspace endpoint serves a demo workspace when no database is configu
 test("the workspace endpoint refuses unsupported methods", async () => {
   const result = await call(workspaceHandler, { method: "DELETE", query: { slug: "x" } });
   assert.equal(result.status, 405);
-  assert.equal(result.headers.Allow, "GET, PUT, OPTIONS");
+  assert.equal(result.headers.Allow, "GET, PUT, POST, OPTIONS");
 });
 
 test("a workspace PUT normalizes whatever the client sends", async (t) => {

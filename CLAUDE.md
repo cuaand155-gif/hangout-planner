@@ -12,6 +12,7 @@ Read this before changing anything that shows calendar events or sharing. These 
 | **Your calendar** (agenda under the grid) | Only you | Every event name. Tap an event to pick it for sharing, or lock it as private. |
 | **A friend's calendar** (Friends → Calendar) | That friend | Exactly what your "Who sees what" level for them allows. |
 | **Booking link** (public page) | Anyone with the link | Only open times, never event names or places. Private events still block bookings. |
+| **Guest view** (group opened from an invite link, no account) | Someone who joined with just a name | Everyone's busy/free, the plan, ideas, votes and RSVPs. **Never** event names or places (even when the group allows event details), emails, account ids or the invite secret: the server strips them (`guestView` in `lib/guests.js`). A guest can change only their own busy times, votes and RSVP. |
 
 Busy/free is the baseline everywhere; names and places are always something the owner switches on, never the default.
 
@@ -24,6 +25,7 @@ Busy/free is the baseline everywhere; names and places are always something the 
 - A **place travels only with its event name**. If the name isn't shared, the place isn't either. Event notes/descriptions are never shared.
 - Sharing choices sync across your devices when signed in.
 - **Free now** is a manual status friends see at a glance.
+- **Invite links are a capability.** A group's link carries a secret code (`?i=`). Anyone with it can join as a guest with just a name; the server keeps only a hash of the guest's browser token. The owner can turn the link off or make a new one (either locks every guest out) and remove a guest (their votes and RSVP go too). A locked group ("Only signed-in members can edit") takes no guests. Guest writes go through `POST /api/workspace` actions, rate-limited, never a whole-group save.
 
 ## Working rules
 
