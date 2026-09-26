@@ -576,3 +576,23 @@ section.free-now::-webkit-scrollbar{display:none}
 .gc-event small{display:block;font-size:10px;color:var(--muted)}
 .gc-event.is-private{color:var(--muted)}.gc-event .icon{width:10px;height:10px;margin-right:3px;vertical-align:-1px}
 @media(max-width:620px){.groupcal-grid{gap:5px}.gc-person{position:static}}
+/* ---------- Guests: join with a name from an invite link ---------- */
+.guest-mode .member-only{display:none!important}
+.guest-join{display:grid;gap:8px;margin:20px 0 4px;text-align:left}
+.guest-join .field-label{margin:0}
+.signin-card .guest-join+.outline-button{margin-top:10px}
+.signin-card #gateSignIn{margin-top:14px}
+.signin-card .gate-note:empty{display:none}
+.signin-card .gate-note{margin-top:12px;font-size:11.5px}
+.guest-banner{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:var(--surface);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px 20px;margin:-12px 0 16px;border:1px solid color-mix(in srgb,var(--purple) 22%,var(--line))}
+.guest-banner>div{flex:1 1 260px;min-width:0}
+.guest-banner strong{display:block;color:var(--ink);font-size:14px}
+.guest-banner small{display:block;color:var(--muted);font-size:12px;line-height:1.5;margin-top:2px}
+.guest-banner .outline-button{flex:none}
+.person-badge.guest{color:var(--muted)}
+.saved-person.is-guest small{color:var(--purple)}
+.invite-controls{margin:10px 0 4px}
+.invite-controls .form-hint{margin:0 0 8px}
+.invite-actions{display:flex;gap:8px;flex-wrap:wrap}
+.time-option [data-window][disabled]{cursor:default;opacity:1}
+@media (max-width:620px){.guest-banner{margin:-6px 0 14px;padding:14px 16px}.guest-banner .outline-button{width:100%}}

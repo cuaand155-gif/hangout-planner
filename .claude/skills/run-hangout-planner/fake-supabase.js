@@ -27,7 +27,11 @@
       return null;
     }
   };
-  const user = USERS[localStorage.getItem("fake-user")] || USERS.alexi;
+  const who = USERS[localStorage.getItem("fake-user")] ? localStorage.getItem("fake-user") : "alexi";
+  const user = USERS[who];
+  // What the API sees as the bearer token; scripts/fake-supabase.mjs (the
+  // server-side fake, WADDLE_FAKE_DB=1) resolves it to the same person.
+  const accessToken = who === "alexi" ? "fake-token" : `fake-token-${who}`;
   const seed = window.__seed || read("fake-seed") || {};
   localStorage.removeItem("fake-seed");
   const saved = read("fake-db") || {};
@@ -119,7 +123,7 @@
       return {
         auth: {
           // Coming back from "Connect Google Calendar" (?calendar) carries a Google token, like the real callback.
-          async getSession() { return { data: { session: { user, access_token: "fake-token", ...(location.search.includes("calendar") ? { provider_token: "fake-google-token", provider_refresh_token: "fake-google-refresh" } : {}) } } }; },
+          async getSession() { return { data: { session: { user, access_token: accessToken, ...(location.search.includes("calendar") ? { provider_token: "fake-google-token", provider_refresh_token: "fake-google-refresh" } : {}) } } }; },
           onAuthStateChange() { return { data: { subscription: { unsubscribe() {} } } }; },
           async signInWithOAuth() { return { error: null }; },
           async signOut() { return { error: null }; },
