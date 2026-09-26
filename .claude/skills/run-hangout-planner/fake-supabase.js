@@ -4,8 +4,10 @@
 // localStorage ("fake-db"), so a reload reads back what was saved. Each
 // browser context starts empty.
 //
-// Who is signed in: localStorage "fake-user" = "alexi" (default), "sam" or
-// "jordan". Alexi and Sam are friends; Jordan is not yet.
+// Who is signed in: localStorage "fake-user" = "alexi" (default), "sam",
+// "jordan" or "dana". Alexi and Sam are friends; Jordan is not yet. Dana signs
+// in with a phone number (+1 416 555 0123) and has no email. "Text me a code"
+// sends nothing: the code is always 123456, and it signs you in as Dana.
 //
 // Rows can be seeded before a page load: localStorage "fake-seed" =
 // {"<table>": [...], ...}. A seeded table replaces that table once, on the
@@ -14,10 +16,12 @@
   const ME = "11111111-1111-1111-1111-111111111111";
   const SAM = "22222222-2222-2222-2222-222222222222";
   const JORDAN = "33333333-3333-3333-3333-333333333333";
+  const DANA = "44444444-4444-4444-4444-444444444444";
   const USERS = {
     alexi: { id: ME, email: "alexi@example.com", user_metadata: { full_name: "Alexi" } },
     sam: { id: SAM, email: "sam@example.com", user_metadata: { full_name: "Sam Rivera" } },
     jordan: { id: JORDAN, email: "jordan@example.com", user_metadata: { full_name: "Jordan Lee" } },
+    dana: { id: DANA, email: "", phone: "14165550123", user_metadata: {} },
   };
   const now = Date.now();
   const read = (key) => {
@@ -27,13 +31,15 @@
       return null;
     }
   };
-  const user = USERS[localStorage.getItem("fake-user")] || USERS.alexi;
+  const signedOut = localStorage.getItem("fake-user") === "none";
+  let user = signedOut ? null : USERS[localStorage.getItem("fake-user")] || USERS.alexi;
+  const listeners = [];
   const seed = window.__seed || read("fake-seed") || {};
   localStorage.removeItem("fake-seed");
   const saved = read("fake-db") || {};
   const defaults = {
     friend_requests: [{ id: "fr1", requester_id: ME, recipient_id: SAM, recipient_email: "sam@example.com", status: "accepted", created_at: new Date(now - 864e5).toISOString() }],
-    profiles: [{ id: SAM, display_name: "Sam Rivera", photo_url: "" }, { id: ME, display_name: "Alexi", photo_url: "" }, { id: JORDAN, display_name: "Jordan Lee", photo_url: "" }],
+    profiles: [{ id: SAM, display_name: "Sam Rivera", photo_url: "" }, { id: ME, display_name: "Alexi", photo_url: "" }, { id: JORDAN, display_name: "Jordan Lee", photo_url: "" }, { id: DANA, display_name: "Dana Park", photo_url: "" }],
     sharing_settings: [],
     presence: [{ user_id: SAM, until: new Date(now + 2 * 3600e3).toISOString(), note: "up for coffee" }],
     // What Sam shares with Alexi: an event on right now.
@@ -119,9 +125,22 @@
       return {
         auth: {
           // Coming back from "Connect Google Calendar" (?calendar) carries a Google token, like the real callback.
-          async getSession() { return { data: { session: { user, access_token: "fake-token", ...(location.search.includes("calendar") ? { provider_token: "fake-google-token", provider_refresh_token: "fake-google-refresh" } : {}) } } }; },
-          onAuthStateChange() { return { data: { subscription: { unsubscribe() {} } } }; },
+          async getSession() { return { data: { session: user ? { user, access_token: "fake-token", ...(location.search.includes("calendar") ? { provider_token: "fake-google-token", provider_refresh_token: "fake-google-refresh" } : {}) } : null } }; },
+          onAuthStateChange(callback) { listeners.push(callback); return { data: { subscription: { unsubscribe() {} } } }; },
           async signInWithOAuth() { return { error: null }; },
+          async signInWithOtp({ phone }) {
+            calls.push(["auth", "signInWithOtp", phone]);
+            return /^\+[1-9]\d{7,14}$/.test(phone || "") ? { data: {}, error: null } : { data: null, error: { message: "Invalid phone number format" } };
+          },
+          async verifyOtp({ phone, token, type }) {
+            calls.push(["auth", "verifyOtp", phone, type]);
+            if (token !== "123456") return { data: null, error: { message: "Token has expired or is invalid" } };
+            user = USERS.dana;
+            localStorage.setItem("fake-user", "dana");
+            const session = { user, access_token: "fake-token" };
+            setTimeout(() => listeners.forEach((listener) => listener("SIGNED_IN", session)));
+            return { data: { session, user }, error: null };
+          },
           async signOut() { return { error: null }; },
         },
         from: query,
@@ -131,6 +150,7 @@
         async rpc(name, args) {
           calls.push(["rpc", name, args]);
           if (name === "publish_share") {
+            if (!user) return { data: null, error: { message: "sign in first" } };
             if (args.p_viewer === user.id) return { data: null, error: { message: "cannot share with yourself" } };
             if (!friendsWith(user.id, args.p_viewer)) return { data: null, error: { message: "only friends can be shared with" } };
             db.calendar_shares = db.calendar_shares
@@ -140,6 +160,7 @@
             return { data: null, error: null };
           }
           if (name === "shared_calendars") {
+            if (!user) return { data: [], error: null };
             const at = Date.now();
             const rows = db.calendar_shares
               .filter((row) => row.viewer_id === user.id && (!args.p_owner || row.owner_id === args.p_owner))

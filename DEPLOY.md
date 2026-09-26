@@ -65,6 +65,23 @@ booking links and workspace locking are built on.
    The publishable (anon) key is designed to be in browser code; the
    service-role key is not. Only ever put the publishable one here.
 
+## 2b. Phone number sign-in (optional)
+
+"Text me a code" signs people in with their phone number instead of Google,
+and lets friends find each other by number.
+
+1. Run the latest `supabase/schema.sql` (it adds `recipient_phone` to
+   friend requests and gives phone-only accounts a profile), then
+   `supabase/rls-test.sql`: every row should read `passed = true`.
+2. Supabase → **Authentication → Sign In / Providers → Phone**: turn it on
+   and connect an SMS provider (Twilio, MessageBird, Vonage or Textlocal).
+   Each needs its own account and charges per text.
+3. Nothing to change in the app or Vercel: it calls `signInWithOtp` and
+   `verifyOtp` with the publishable key it already has.
+
+Until the provider is on, "Text me a code" says phone sign-in isn't switched
+on yet, and Google keeps working as before.
+
 ## 3. Friends, sharing, free now and booking links
 
 These ride on the same accounts as sign-in and need no extra configuration,

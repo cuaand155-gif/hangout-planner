@@ -2,7 +2,7 @@
 
 The complete picture of what Waddle is supposed to do, where each piece lives, what proves it works, and what's left. Use it as the checklist before calling Waddle "done", and update it whenever a feature is added or changed. The product rules for what each view may show are in [CLAUDE.md](CLAUDE.md) and win over anything here.
 
-Last checked: 2026-09-26 (database rules on the live project: 38/38). Tests: 2026-09-25, master `f4199d1` plus the rest of Phase A (merged straight after). 229 unit/API tests and 50 browser tests, all passing (the browser suite ran twice in a row).
+Last checked: 2026-09-26 (database rules on the live project: 38/38, before the phone-number checks were added). Tests: 2026-09-26, with friends without groups, phone sign-in, organization groups and always-busy hours: 248 unit/API tests and 55 browser tests, all passing.
 
 ## 1. What Waddle is
 
@@ -18,7 +18,7 @@ Live: https://hangout-planner-omega.vercel.app (also hangout-planner-cuacua.verc
 | Offline / install | Service worker and manifest (installable on a phone home screen) | `sw.js`, `manifest.webmanifest`, `lib/pwa.js` |
 | Server | Vercel functions | `api/workspace.js` (groups), `api/groups.js`, `api/calendar.js` (ICS links), `api/google.js` (Google sync), `api/book.js` (booking links), `api/_email.js` (booking emails) |
 | Database | Supabase Postgres with row-level security | Tables: `workspaces`, `profiles`, `friend_requests`, `calendar_shares`, `sharing_settings`, `presence`, `booking_pages`, `bookings`, `google_tokens`. Schema in `supabase/schema.sql`; policy checks in `supabase/rls-*.sql` |
-| Sign-in | Google through Supabase Auth | `app.js` (`signInWithOAuth`) |
+| Sign-in | Google, or a texted code to your phone, through Supabase Auth | `app.js` (`signInWithOAuth`, `signInWithOtp`/`verifyOtp`), `lib/phone.js` |
 | Hosting | Vercel project `hangout-planner`, deploys `master` automatically | `vercel.json` |
 
 ### Settings the live site needs (Vercel environment variables)
@@ -38,10 +38,15 @@ Status key: ✅ proven by an automated browser test · 🧪 proven by unit/API t
 | Feature | Where | Proven by | Status |
 |---|---|---|---|
 | Demo group loads with no errors | `app.js` | e2e "loads the demo group" | ✅ |
+| Sign in with a phone number (texted code) | Account dialog, sign-in gate | e2e "sign in with a phone number and a texted code" (fake Supabase) | ✅ in the app; 🙋 needs Phone sign-in turned on in Supabase with an SMS provider |
 | Opening a group needs sign-in (when the database is on) | `api/workspace.js` 401 gate | e2e "sign-in gate" (signed out: the gate, nothing loaded or saved; signed in: the group opens), with `/api/workspace` answering as it does with a database; `api`, `groups-api` tests | ✅ |
 | Create, rename and switch between groups | "Your groups", `lib/groups.js`, `api/groups.js` | e2e "create a group, rename it, switch…"; `groups-api`, `groups-sync` tests | ✅ |
 | Invite link, add a placeholder person, remove someone | People dialog, `lib/membership.js` | e2e "invite link, a placeholder person, and removing people"; `membership` tests | ✅ |
-| Friend requests (send, accept) | Friends tab, `lib/friends.js` | e2e "send a friend request, they accept it…" (two browsers); `friends` tests | ✅ |
+| Friend requests (send, accept) | Friends page (sidebar), `lib/friends.js` | e2e "send a friend request, they accept it…" (two browsers); `friends` tests | ✅ |
+| Friends page: friends without a group | `#friendsDialog`, sidebar Friends | e2e "the Friends page: a request by phone number…" | ✅ |
+| Friend requests by phone number | `lib/friends.js`, `lib/phone.js`, `recipient_phone` | e2e "…by phone number, accepted by the person with that number" (two browsers); `friends`, `phone` tests; `supabase/rls-test.sql` phone checks | ✅ in the app; 🙋 run `schema.sql` and `rls-test.sql` on the live project |
+| 1-on-1 with a friend: "You're both free", plan it, same space for both | Friends → Calendar / 1-on-1, `pairSlug`, `freeTogether` | e2e "a 1-on-1 with a friend…" (both friends reach the same link); `groups-sync`, `planner` tests | ✅ |
+| Organization or business groups (free/busy only, always) | Your groups → Start a new group, Settings → Group type, `normalizeWorkspaceState` | e2e "an organization group is free/busy only…"; `planner` test (names stripped on save) | ✅ |
 | Getting-started checklist for new groups | `lib/checklist.js` | e2e "getting-started checklist…"; `checklist` tests | ✅ |
 | Activity feed / bell | `#activityButton` | e2e "the bell shows a dot for news…" | ✅ |
 | Profile: name, avatar colours | `lib/avatar.js`, `lib/palettes.js` | e2e "profile name and photo…; the colour palette"; `avatar`, `palettes` tests | ✅ |
@@ -55,6 +60,7 @@ Status key: ✅ proven by an automated browser test · 🧪 proven by unit/API t
 | Any ICS link (iCloud, Outlook, Google secret address) | `api/calendar.js`, `lib/ics.js` | e2e "an ICS link…" (a real .ics parsed by `lib/ics.js`; only the download is faked); `api`, `ics` tests for fetching and its safety checks | ✅ |
 | Paint your own busy hours | My availability | e2e "painting marks hours busy" | ✅ |
 | Save as my usual week; I'm free all week | `#saveUsualWeek`, `#clearMyWeek` | e2e "save as my usual week…"; `planner` tests | ✅ |
+| Always busy: the same hours blocked every week (quick adds for work, school, sleep) | Sidebar → Always busy, `lib/blocked.js` | e2e "block the same hours every week…" (group row, friend's share, booking link, account sync, the grid); `blocked`, `planner` tests | ✅ |
 
 ### Seeing schedules (rules in CLAUDE.md)
 
@@ -131,10 +137,13 @@ Done when: all rows are ✅ except the 🙋 ones, and both test commands pass. D
 ### Phase B: things only Alexi can do
 
 1. ~~**Reconnect Google once**~~ Done: the server holds a Google connection saved 2026-09-25 with the live keys.
-2. **Two-account test with a friend**: both sign in, add each other, check sharing levels, private events, Free now, a shared plan, and the group calendar. Open your booking link in a private window; Google events should show as unavailable.
-3. **Google's "unverified app" warning**: add friends as test users in Google Cloud (quick), or apply for verification (weeks).
-4. **Booking emails** (optional): buy a domain, create a free Resend account, then add `RESEND_API_KEY` and `BOOKING_EMAIL_FROM` in Vercel.
-5. ~~**Tidy-up**~~ Done 2026-09-26: the Google key file is in Drive's trash (the keys live in Vercel).
+2. **Turn on phone features** (new, 2026-09-26):
+   - Run the updated `supabase/schema.sql` in the Supabase SQL editor (adds `recipient_phone` to friend requests and lets phone-only accounts get a profile), then run `supabase/rls-test.sql`: every row should read `passed = true`. Until then, friend requests by email keep working and ones by phone show "need the latest schema".
+   - Supabase → Authentication → Sign In / Providers → **Phone**: turn it on and connect an SMS provider (Twilio, MessageBird, Vonage or Textlocal; each needs its own account and costs a little per text). Until then, "Text me a code" says phone sign-in isn't switched on yet.
+3. **Two-account test with a friend**: both sign in, add each other, check sharing levels, private events, Free now, a shared plan, and the group calendar. Open your booking link in a private window; Google events should show as unavailable.
+4. **Google's "unverified app" warning**: add friends as test users in Google Cloud (quick), or apply for verification (weeks).
+5. **Booking emails** (optional): buy a domain, create a free Resend account, then add `RESEND_API_KEY` and `BOOKING_EMAIL_FROM` in Vercel.
+6. ~~**Tidy-up**~~ Done 2026-09-26: the Google key file is in Drive's trash (the keys live in Vercel).
 
 ### Phase C: ideas for later (not started, need a yes)
 

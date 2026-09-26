@@ -16,6 +16,7 @@ import {
   formatRelative,
   formatWeekLabel,
   formatWindow,
+  freeTogether,
   hasVoted,
   initialsFor,
   isSharingOn,
@@ -33,9 +34,11 @@ import {
   widenCoverage,
 } from "./lib/planner.js";
 import { applyMembership, findMemberForParty, linkMemberToParty, normalizeEmail, planManualClaim, resolveMembership } from "./lib/membership.js";
-import { createFriendStore, describeParty, partitionRequests, profileIdsFor, rejectionFor } from "./lib/friends.js";
+import { createFriendStore, describeParty, partitionRequests, profileIdsFor, recipientFor, rejectionFor } from "./lib/friends.js";
+import { BLOCK_PRESETS, DAY_NAMES, addRule, blockedBlocksOn, blockedEvents, describeRule, removeRule, rulesForGroup } from "./lib/blocked.js";
+import { formatPhone, normalizePhone } from "./lib/phone.js";
 import { buildPlanIcs, googleCalendarUrl, planUid } from "./lib/calendar-export.js";
-import { forgetGroup, mergeGroups, newGroupSlug, rememberGroup, renameGroup } from "./lib/groups.js";
+import { forgetGroup, isPairSlug, mergeGroups, newGroupSlug, pairSlug, rememberGroup, renameGroup } from "./lib/groups.js";
 import { dueForSync, sameBusy } from "./lib/sync.js";
 import { IDEA_PHOTO_HEIGHT, IDEA_PHOTO_MAX_LENGTH, IDEA_PHOTO_WIDTH, coverCrop, isSafeImageDataUrl, squareCrop } from "./lib/avatar.js";
 import { PALETTES, normalizePalette } from "./lib/palettes.js";
@@ -524,6 +527,11 @@ function render() {
   renderChecklist();
 }
 
+/** "friends" (the usual group), "organization" (free/busy only, always) or "pair" (a 1-on-1). */
+function groupKind() {
+  return session.state.kind || "friends";
+}
+
 function renderChrome() {
   $("workspaceName").textContent = session.state.name;
   document.title = `${session.state.name} — Waddle`;
@@ -535,7 +543,15 @@ function renderChrome() {
   }
   $("todayStamp").textContent = formatDayStamp(new Date()).toUpperCase();
   $("syncState").textContent = ui.saving ? "SAVING" : session.persisted ? "LIVE" : session.offline ? "OFFLINE" : "DEMO";
-  $("privacyStatus").textContent = session.state.privacy === "details" ? "Event details shared" : "Busy / free only";
+  const kind = groupKind();
+  $("privacyStatus").textContent = kind === "organization" ? "Free / busy only, always" : session.state.privacy === "details" ? "Event details shared" : "Busy / free only";
+  $("groupKindLabel").textContent = kind === "organization" ? "Organization" : kind === "pair" ? "1-on-1" : "Group";
+  const detailsRadio = document.querySelector('input[name="privacy"][value="details"]');
+  if (detailsRadio) {
+    detailsRadio.disabled = kind === "organization";
+    detailsRadio.closest(".privacy-option")?.classList.toggle("disabled", kind === "organization");
+  }
+  $("privacyOrgNote").hidden = kind !== "organization";
   $("profileName").textContent = displayName();
   $("profileSubtitle").textContent = profile.shareSchedule ? "Availability shared" : "Private schedule";
 
@@ -1691,29 +1707,53 @@ $("newGroupForm").addEventListener("submit", (event) => {
   const name = $("newGroupName").value.trim();
   if (!name) return;
   const slug = newGroupSlug(name);
-  // The server names a new group after its link; carry the real name over so
-  // the first load can set it.
-  try {
-    window.sessionStorage.setItem(STORAGE.pendingName(slug), name);
-  } catch {
-    /* Without session storage the group keeps its link-derived name. */
-  }
+  const kind = document.querySelector('input[name="newGroupKind"]:checked')?.value === "organization" ? "organization" : "friends";
+  // The server names a new group after its link; carry the real name (and
+  // kind) over so the first load can set it.
+  rememberSetup(slug, { name, kind });
   window.location.href = groupUrl(slug);
 });
 
-/** Applies the name typed when the group was created, once. */
-async function applyPendingName() {
-  let pending = null;
+function rememberSetup(slug, setup) {
   try {
-    pending = window.sessionStorage.getItem(STORAGE.pendingName(session.slug));
-    window.sessionStorage.removeItem(STORAGE.pendingName(session.slug));
+    window.sessionStorage.setItem(STORAGE.pendingName(slug), JSON.stringify(setup));
   } catch {
+    /* Without session storage the group keeps its link-derived name. */
+  }
+}
+
+/** What was chosen when this group was created: { name, kind, friend, window }, once. */
+function takeSetup() {
+  try {
+    const raw = window.sessionStorage.getItem(STORAGE.pendingName(session.slug));
+    window.sessionStorage.removeItem(STORAGE.pendingName(session.slug));
+    if (!raw) return null;
+    try {
+      const setup = JSON.parse(raw);
+      if (setup && typeof setup === "object") return setup;
+    } catch {
+      /* Older pages stored just the name. */
+    }
+    return { name: raw };
+  } catch {
+    return null;
+  }
+}
+
+/** Applies the name and kind typed when the group was created, and sets up a 1-on-1. */
+async function applyPendingName() {
+  const setup = takeSetup();
+  if (!setup || session.needsSignIn) return;
+  if (setup.friend) {
+    await setUpPair(setup);
     return;
   }
-  if (!pending || pending === session.state.name) return;
+  const kind = setup.kind === "organization" ? "organization" : "friends";
+  if ((!setup.name || setup.name === session.state.name) && kind === groupKind()) return;
   await mutate((draft) => {
-    draft.name = pending;
-  }, { note: `Group created: ${pending}` });
+    if (setup.name) draft.name = setup.name;
+    draft.kind = kind;
+  }, { note: `${kind === "organization" ? "Organization" : "Group"} created: ${setup.name || session.state.name}` });
 }
 
 /* ------------------------------------------------------------- dialogs */
@@ -1731,6 +1771,8 @@ const dialogs = {
   groups: $("groupsDialog"),
   sharing: $("sharingDialog"),
   friendCalendar: $("friendCalendarDialog"),
+  friends: $("friendsDialog"),
+  blocked: $("blockedDialog"),
 };
 
 const openDialog = (dialog) => {
@@ -1749,6 +1791,11 @@ const bookingOwner = initBookingOwner({
   displayName: () => displayName(),
   calendarLinks: () => calendarSources.map((source) => source.url).filter((url) => /^(https|webcal):\/\//i.test(String(url || ""))),
   calendarEvents: () => allMyEvents(),
+  blockedEvents: (days) => {
+    const from = new Date();
+    from.setHours(0, 0, 0, 0);
+    return blockedEvents(sharing.blocked, from, addDays(from, days + 2));
+  },
   hasCalendars: () => calendarSources.length > 0 || allMyEvents().length > 0,
   googleOnServer: () => googleServer.configured && googleServer.connected,
   showToast: (message) => showToast(message),
@@ -2029,6 +2076,7 @@ $("privacyButton").addEventListener("click", () => openDialog(dialogs.privacy));
 
 for (const option of document.querySelectorAll("#privacyDialog .privacy-option")) {
   option.addEventListener("click", () => {
+    if (option.querySelector("input").disabled) return;
     for (const item of document.querySelectorAll("#privacyDialog .privacy-option")) item.classList.remove("active");
     option.classList.add("active");
     option.querySelector("input").checked = true;
@@ -2037,6 +2085,10 @@ for (const option of document.querySelectorAll("#privacyDialog .privacy-option")
 
 $("savePrivacy").addEventListener("click", async () => {
   const detailed = document.querySelector('input[name="privacy"]:checked').value === "details";
+  if (detailed && groupKind() === "organization") {
+    showToast("Organization groups only share free and busy. Change the group type in Settings first.");
+    return;
+  }
   await mutate(
     (draft) => {
       draft.privacy = detailed ? "details" : "busy";
@@ -2289,6 +2341,83 @@ $("googleSignInButton").addEventListener("click", async () => {
 });
 
 $("gateSignIn").addEventListener("click", () => $("googleSignInButton").click());
+$("gatePhone").addEventListener("click", () => {
+  openDialog(dialogs.account);
+  $("phoneNumber").focus();
+});
+
+/* Signing in with a phone number: Supabase texts a one-time code. */
+
+const phoneLogin = { phone: "", busy: false };
+
+function phoneAuthError(error) {
+  const message = String(error?.message || "");
+  if (/provider|disabled|not enabled|unsupported|sms/i.test(message)) return "Phone sign-in isn't switched on for Waddle yet. Use Google for now.";
+  if (/expired|invalid|token/i.test(message)) return "That code didn't work. Check it, or send a new one.";
+  if (/rate|too many|seconds/i.test(message)) return "Too many tries. Wait a minute, then send a new code.";
+  return "That didn't go through. Try again in a moment.";
+}
+
+$("phoneSignInForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (phoneLogin.busy) return;
+  if (!supabaseClient) {
+    showToast("Phone sign-in needs the Supabase keys first.");
+    return;
+  }
+  const phone = normalizePhone($("phoneNumber").value);
+  if (!phone) {
+    showToast("That doesn't look like a phone number. Outside North America, start with + and your country code.");
+    return;
+  }
+  phoneLogin.busy = true;
+  $("phoneSendCode").disabled = true;
+  const { error } = await supabaseClient.auth.signInWithOtp({ phone });
+  phoneLogin.busy = false;
+  $("phoneSendCode").disabled = false;
+  if (error) {
+    $("phoneHint").textContent = phoneAuthError(error);
+    showToast(phoneAuthError(error));
+    return;
+  }
+  phoneLogin.phone = phone;
+  $("phoneCodeRow").hidden = false;
+  $("phoneSendCode").textContent = "Send again";
+  $("phoneHint").textContent = `We texted a code to ${formatPhone(phone)}. It works for a few minutes.`;
+  $("phoneCode").focus();
+});
+
+async function verifyPhoneCode() {
+  if (phoneLogin.busy || !supabaseClient || !phoneLogin.phone) return;
+  const token = $("phoneCode").value.replace(/\D/g, "");
+  if (token.length < 6) {
+    showToast("Enter the 6-digit code from the text.");
+    return;
+  }
+  phoneLogin.busy = true;
+  $("phoneVerify").disabled = true;
+  const { error } = await supabaseClient.auth.verifyOtp({ phone: phoneLogin.phone, token, type: "sms" });
+  phoneLogin.busy = false;
+  $("phoneVerify").disabled = false;
+  if (error) {
+    showToast(phoneAuthError(error));
+    return;
+  }
+  // onAuthStateChange takes it from here, like any other sign-in.
+  $("phoneCode").value = "";
+  $("phoneCodeRow").hidden = true;
+  $("phoneSendCode").textContent = "Text me a code";
+  phoneLogin.phone = "";
+  dialogs.account.close();
+  showToast("Signed in.");
+}
+
+$("phoneVerify").addEventListener("click", verifyPhoneCode);
+$("phoneCode").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  verifyPhoneCode();
+});
 
 $("signOutButton").addEventListener("click", async () => {
   if (!supabaseClient) return;
@@ -2302,18 +2431,22 @@ function renderAccount(user) {
   ui.user = user || null;
   bookingOwner?.reload();
   const signedIn = Boolean(user);
-  const name = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email || "Google account";
+  const viaPhone = Boolean(user && !user.email && user.phone);
+  const name = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email || (user?.phone ? formatPhone(user.phone) : "Google account");
   $("accountStatus").textContent = signedIn ? "Signed in" : "Not signed in";
   $("accountStatusDetail").textContent = signedIn ? `${name} connected` : "Your local planner session is active.";
   $("accountStatusDot").style.background = signedIn ? "#64cf8b" : "#aaa7b5";
   $("googleSignInButton").hidden = signedIn;
+  $("phoneSignInForm").hidden = signedIn;
   $("signOutButton").hidden = !signedIn;
   $("accountCopy").textContent = signedIn
     ? "Your availability follows this account between devices."
     : "Sign in to keep your groups and availability wherever you plan.";
   $("authNote").textContent = signedIn
-    ? "Signed in with Google. Calendar access is only requested when you connect a calendar."
-    : "Signing in links this planner to your Google account so your name and availability follow you between devices.";
+    ? viaPhone
+      ? "Signed in with your phone number. Friends can find you by it."
+      : "Signed in with Google. Calendar access is only requested when you connect a calendar."
+    : "Signing in with Google or your phone number keeps your name, friends and availability with you on every device.";
   renderChrome();
 }
 
@@ -2517,7 +2650,7 @@ async function loadFriends({ force = false } = {}) {
 }
 
 function friendGroups() {
-  return partitionRequests(friends.rows, { userId: ui.user?.id, email: ui.user?.email });
+  return partitionRequests(friends.rows, { userId: ui.user?.id, email: ui.user?.email, phone: ui.user?.phone });
 }
 
 function friendRowMarkup(row, actions, { withStatus = false } = {}) {
@@ -2526,7 +2659,7 @@ function friendRowMarkup(row, actions, { withStatus = false } = {}) {
   const status = withStatus ? statusLine(party.id) : null;
   return `<div class="friend-row">
     <div class="avatar avatar-lilac${status?.kind === "free-now" ? " is-free" : ""}"${photo ? ` style="background-image:url(&quot;${escapeAttribute(photo)}&quot;);background-size:cover;background-position:center"` : ""}>${photo ? "" : escapeHtml(initialsFor(party.name))}</div>
-    <div><strong>${escapeHtml(party.name)}</strong><small>${escapeHtml(party.pendingSignup ? "Waiting for them to sign in" : party.email || "")}</small>${
+    <div><strong>${escapeHtml(party.name)}</strong><small>${escapeHtml(party.pendingSignup ? "Waiting for them to sign in" : party.email || party.phone || "")}</small>${
       status ? `<small class="friend-status ${status.kind}">${escapeHtml(status.text)}</small>` : ""
     }</div>
     <div class="friend-actions">${actions}</div>
@@ -2539,6 +2672,7 @@ function renderFriends(errorMessage) {
   $("friendsSignedIn").hidden = !signedIn;
   if (!signedIn) {
     $("friendBadge").hidden = true;
+    $("friendsNavBadge").hidden = true;
     return;
   }
 
@@ -2567,13 +2701,17 @@ function renderFriends(errorMessage) {
           // A row matched only by name is probably them, but nothing proves it
           // yet — offer to link it rather than silently adding a second copy.
           const linked = match && party.id && match.userId === party.id;
-          const action = linked
-            ? `<button type="button" disabled>In this group</button>`
-            : match
-              ? `<button type="button" data-add-friend="${escapeAttribute(row.id)}">Link to them</button>`
-              : `<button type="button" data-add-friend="${escapeAttribute(row.id)}">Add to group</button>`;
+          // In a 1-on-1 there is nobody else to add: that's what a group is for.
+          const action = groupKind() === "pair"
+            ? ""
+            : linked
+              ? `<button type="button" class="quiet" disabled>In this group</button>`
+              : match
+                ? `<button type="button" class="quiet" data-add-friend="${escapeAttribute(row.id)}">Link to them</button>`
+                : `<button type="button" class="quiet" data-add-friend="${escapeAttribute(row.id)}">Add to this group</button>`;
           const calendar = party.id
-            ? `<button type="button" data-view-calendar="${escapeAttribute(party.id)}" data-friend-name="${escapeAttribute(party.name)}">Calendar</button>`
+            ? `<button type="button" data-view-calendar="${escapeAttribute(party.id)}" data-friend-name="${escapeAttribute(party.name)}">Calendar</button>` +
+              `<button type="button" class="accept" data-one-on-one="${escapeAttribute(party.id)}">1-on-1</button>`
             : "";
           return friendRowMarkup(row, calendar + action, { withStatus: true });
         })
@@ -2583,19 +2721,31 @@ function renderFriends(errorMessage) {
   renderStatusCard();
   $("friendBadge").textContent = String(incoming.length);
   $("friendBadge").hidden = incoming.length === 0;
+  $("friendsNavBadge").textContent = String(incoming.length);
+  $("friendsNavBadge").hidden = incoming.length === 0;
   $("friendsTab").textContent = incoming.length ? `Friends (${incoming.length})` : "Friends";
 }
 
 $("friendsSignInButton").addEventListener("click", () => {
-  dialogs.people.close();
+  dialogs.friends.close();
   openDialog(dialogs.account);
 });
+
+/** The Friends page: requests, your friends, and 1-on-1s. No group needed. */
+function openFriends() {
+  if (dialogs.people.open) dialogs.people.close();
+  renderFriends();
+  openDialog(dialogs.friends);
+  loadFriends();
+}
+
+$("friendsButton").addEventListener("click", openFriends);
 
 $("friendRequestForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!friendStore || !ui.user || friends.busy) return;
   const field = $("friendRequestEmail");
-  const reason = rejectionFor(field.value, { email: ui.user.email, rows: friends.rows.filter((row) => row.requester_id === ui.user.id) });
+  const reason = rejectionFor(field.value, { email: ui.user.email, phone: ui.user.phone, rows: friends.rows.filter((row) => row.requester_id === ui.user.id) });
   if (reason) {
     showToast(reason);
     return;
@@ -2605,7 +2755,7 @@ $("friendRequestForm").addEventListener("submit", async (event) => {
   button.disabled = true;
   const { error } = await friendStore.send({
     requesterId: ui.user.id,
-    email: field.value,
+    ...recipientFor(field.value),
     note: `${displayName()} wants to plan with you on Waddle.`,
   });
   friends.busy = false;
@@ -2621,7 +2771,8 @@ $("friendRequestForm").addEventListener("submit", async (event) => {
 
 function friendError(error) {
   const message = String(error?.message || "");
-  if (/duplicate key|friend_requests_live_pair/i.test(message)) return "You already have a request waiting for them.";
+  if (/duplicate key|friend_requests_live_pair|friend_requests_live_phone_pair/i.test(message)) return "You already have a request waiting for them.";
+  if (/recipient_phone|recipient_email.*null|null value/i.test(message)) return "Friend requests by phone number need the latest supabase/schema.sql. Email works now.";
   if (/row-level security|permission/i.test(message)) return "Run supabase/schema.sql to enable friend requests.";
   if (/relation .* does not exist|friend_requests/i.test(message)) return "Friend requests need the latest supabase/schema.sql.";
   return "That did not go through. Try again in a moment.";
@@ -2630,8 +2781,15 @@ function friendError(error) {
 $("friendsPanel").addEventListener("click", (event) => {
   const view = event.target.closest("[data-view-calendar]");
   if (!view || !shareStore || !ui.user) return;
-  dialogs.people.close();
+  dialogs.friends.close();
   openFriendCalendar(view.dataset.viewCalendar, view.dataset.friendName || "Your friend");
+});
+
+$("friendsPanel").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-one-on-one]");
+  if (!button || !ui.user) return;
+  button.disabled = true;
+  startOneOnOne(button.dataset.oneOnOne).finally(() => (button.disabled = false));
 });
 
 $("friendsPanel").addEventListener("click", async (event) => {
@@ -2707,12 +2865,15 @@ $("managePeople").addEventListener("click", () => {
 
 for (const tab of document.querySelectorAll(".people-tab")) {
   tab.addEventListener("click", () => {
+    // Friends live on their own page now, since they don't need a group.
+    if (tab.dataset.peopleTab === "friends") {
+      openFriends();
+      return;
+    }
     for (const item of document.querySelectorAll(".people-tab")) item.classList.remove("active");
     tab.classList.add("active");
     $("friendForm").hidden = tab.dataset.peopleTab !== "friend";
-    $("friendsPanel").hidden = tab.dataset.peopleTab !== "friends";
     $("groupForm").hidden = tab.dataset.peopleTab !== "group";
-    if (tab.dataset.peopleTab === "friends") loadFriends();
   });
 }
 
@@ -3035,6 +3196,10 @@ applyAppearance(appearance);
 $("settingsButton").addEventListener("click", () => {
   const config = settings();
   $("settingWorkspaceName").value = session.state.name;
+  const pair = groupKind() === "pair";
+  $("settingGroupKind").value = pair ? "friends" : groupKind();
+  for (const id of ["settingGroupKind", "groupKindHint"]) $(id).hidden = pair;
+  $("settingGroupKind").previousElementSibling.hidden = pair;
   $("settingWeekStart").value = String(config.weekStartsOn);
   $("settingMinWindow").innerHTML = [1, 2, 3, 4, 6]
     .map((hours) => `<option value="${hours}"${hours === config.minWindowHours ? " selected" : ""}>${hours} hour${hours === 1 ? "" : "s"}</option>`)
@@ -3060,9 +3225,14 @@ $("settingsForm").addEventListener("submit", async (event) => {
   }
   const name = $("settingWorkspaceName").value.trim() || session.state.name;
   const locked = $("settingLocked").checked && Boolean(ui.user);
+  const kind = groupKind() === "pair" ? "pair" : $("settingGroupKind").value;
+  const kindChanged = kind !== groupKind();
   await mutate(
     (draft) => {
       draft.name = name;
+      // Organization: normalizeWorkspaceState also turns event details off
+      // and strips every name and place already saved.
+      draft.kind = kind;
       draft.settings = {
         weekStartsOn: Number($("settingWeekStart").value),
         dayStart,
@@ -3076,10 +3246,10 @@ $("settingsForm").addEventListener("submit", async (event) => {
         if (member) member.userId = ui.user.id;
       }
     },
-    { note: "Settings updated" }
+    { note: kindChanged ? (kind === "organization" ? "Now an organization group: free and busy only" : "Now a friends group") : "Settings updated" }
   );
   dialogs.settings.close();
-  showToast("Settings saved.");
+  showToast(kindChanged && kind === "organization" ? "Saved. This group now only ever shows free and busy." : "Settings saved.");
 });
 
 $("exportWorkspace").addEventListener("click", () => {
@@ -3166,6 +3336,7 @@ async function loadRemoteSharing() {
   renderMyCalendar();
   schedulePublish();
   if (hiddenChanged || session.state.privacy === "details") await republishToGroup();
+  await syncBlockedToGroup();
 }
 
 async function refreshHiddenKeys() {
@@ -3202,7 +3373,9 @@ async function publishToFriends() {
   const published = readJson(STORAGE.published, {});
   const mine = published[ownerId] || {};
   await refreshHiddenKeys();
-  const events = withoutHidden(allMyEvents(), hiddenKeys);
+  const range = syncRange();
+  // Always-busy hours read as plain busy time, whatever the friend's level.
+  const events = [...withoutHidden(allMyEvents(), hiddenKeys), ...blockedEvents(sharing.blocked, range.from, range.to)];
   const now = new Date();
   let failed = false;
   for (const { party } of acceptedFriends()) {
@@ -3601,6 +3774,105 @@ $("saveSharing").addEventListener("click", async () => {
   showToast("Sharing saved.");
 });
 
+/* Always busy: the same hours blocked every week */
+
+/** Puts your always-busy hours (times only, never labels) on your row in this group. */
+async function syncBlockedToGroup() {
+  const mine = me();
+  if (!mine || session.needsSignIn) return;
+  const wanted = rulesForGroup(sharing.blocked);
+  if (JSON.stringify(wanted) === JSON.stringify(mine.blocked || [])) return;
+  await mutate((draft) => {
+    const member = draft.members.find((entry) => entry.id === memberId);
+    if (!member) return;
+    if (wanted.length) member.blocked = wanted;
+    else delete member.blocked;
+    member.updatedAt = new Date().toISOString();
+  });
+}
+
+let blockedDays = [1, 2, 3, 4, 5];
+
+function renderBlocked() {
+  const rules = sharing.blocked || [];
+  $("blockedPresets").innerHTML = BLOCK_PRESETS.map((preset) => {
+    const added = rules.some((rule) => rule.id === addRule([], preset)[0].id);
+    return `<button type="button" class="preset-chip${added ? " added" : ""}" data-blocked-preset="${preset.key}"${added ? " disabled" : ""}>
+      <strong>${escapeHtml(preset.label)}</strong><small>${escapeHtml(describeRule(preset))}</small></button>`;
+  }).join("");
+  $("blockedDays").innerHTML = DAY_NAMES.map((name, index) => ({ name, day: index }))
+    // Monday first, like the rest of the week pickers.
+    .sort((a, b) => ((a.day + 6) % 7) - ((b.day + 6) % 7))
+    .map(({ name, day }) => `<label class="weekday-chip"><input type="checkbox" value="${day}"${blockedDays.includes(day) ? " checked" : ""} /><span>${name}</span></label>`)
+    .join("");
+  $("blockedList").innerHTML = rules.length
+    ? rules
+        .map(
+          (rule) => `<div class="blocked-row"><span class="blocked-icon">${svgIcon("lock")}</span><div><strong>${escapeHtml(rule.label || "Busy")}</strong><small>${escapeHtml(describeRule(rule))}</small></div>
+          <button type="button" class="text-button" data-remove-blocked="${escapeAttribute(rule.id)}" aria-label="Stop blocking ${escapeAttribute(rule.label || describeRule(rule))}">Remove</button></div>`
+        )
+        .join("")
+    : '<p class="form-hint">Nothing yet. Tap a quick add above, or choose days and times.</p>';
+  $("blockedSyncNote").textContent = ui.user
+    ? "Saved to your account, so it follows you to your other devices and every group you're in."
+    : "Saved on this device, for every group you open here. Sign in to use it on your other devices too.";
+}
+
+async function saveBlocked(rules, message) {
+  const before = (sharing.blocked || []).length;
+  saveSharing({ ...sharing, blocked: rules });
+  renderBlocked();
+  showToast(message || (sharing.blocked.length > before ? "Blocked every week." : "Removed."));
+  schedulePublish();
+  await syncBlockedToGroup();
+  render();
+}
+
+function openBlocked() {
+  for (const dialog of [dialogs.settings]) if (dialog.open) dialog.close();
+  renderBlocked();
+  openDialog(dialogs.blocked);
+}
+
+for (const id of ["blockedButton", "mineBlockedButton", "settingsBlockedButton"]) $(id).addEventListener("click", openBlocked);
+
+$("blockedPresets").addEventListener("click", (event) => {
+  const chip = event.target.closest("[data-blocked-preset]");
+  const preset = chip && BLOCK_PRESETS.find((entry) => entry.key === chip.dataset.blockedPreset);
+  if (!preset) return;
+  saveBlocked(addRule(sharing.blocked, preset), `${preset.label}: ${describeRule(preset)}, blocked every week.`);
+});
+
+$("blockedDays").addEventListener("change", () => {
+  blockedDays = [...$("blockedDays").querySelectorAll("input:checked")].map((input) => Number(input.value));
+});
+
+$("blockedForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!blockedDays.length) {
+    showToast("Pick at least one day.");
+    return;
+  }
+  const rule = { days: blockedDays, start: $("blockedStart").value, end: $("blockedEnd").value, label: $("blockedLabel").value };
+  const [clean] = addRule([], rule);
+  if (!clean) {
+    showToast("Choose a start and an end time that aren't the same.");
+    return;
+  }
+  if ((sharing.blocked || []).some((entry) => entry.id === clean.id)) {
+    showToast("Those times are already blocked.");
+    return;
+  }
+  $("blockedLabel").value = "";
+  saveBlocked(addRule(sharing.blocked, rule), `${describeRule(clean)}, blocked every week.`);
+});
+
+$("blockedList").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-remove-blocked]");
+  if (!button) return;
+  saveBlocked(removeRule(sharing.blocked, button.dataset.removeBlocked), "Removed. Those hours are free again.");
+});
+
 /* A friend's calendar, as much as they chose to show you */
 
 function renderFriendCalendar() {
@@ -3611,6 +3883,7 @@ function renderFriendCalendar() {
   $("friendCalendarTitle").textContent = `${view.name}'s calendar`;
   $("friendWeekLabel").textContent = formatWeekLabel(week[0].date, week.length);
   const body = $("friendAgenda");
+  renderFreeTogether(view, week);
   if (view.loading) {
     body.innerHTML = '<p class="form-hint">Loading…</p>';
     return;
@@ -3624,6 +3897,137 @@ function renderFriendCalendar() {
     view.updatedAt ? `Updated ${formatRelative(view.updatedAt)}` : "",
   ].filter(Boolean).join(" · ");
   body.innerHTML = `<div class="agenda compact-agenda">${agendaMarkup(week, view.events, { owner: false, emptyText: "Free" })}</div>`;
+}
+
+/** Your own busy time between two dates: calendars, always-busy hours and what you marked in this group. */
+function myBusyRanges(from, to) {
+  const ranges = allMyEvents().filter((event) => !event.allDay).map((event) => ({ start: event.start, end: event.end }));
+  ranges.push(...blockedEvents(sharing.blocked, from, to));
+  const mine = me();
+  if (mine) {
+    for (let day = new Date(from); day < to; day = addDays(day, 1)) ranges.push(...(busyBlocksFor(mine, day) || []));
+  }
+  return ranges;
+}
+
+/** "Free together": hours this week when neither of you is busy, from what they share with you. */
+function renderFreeTogether(view, week) {
+  const box = $("freeTogether");
+  const first = view.name.split(" ")[0];
+  if (view.loading) {
+    box.innerHTML = "";
+    return;
+  }
+  if (!view.events) {
+    box.innerHTML = `<p class="form-hint">${escapeHtml(first)} isn't sharing their calendar with you, so Waddle can't tell when you're both free. You can still start a 1-on-1 and pick a time together.</p>`;
+    return;
+  }
+  const from = week[0].date;
+  const to = addDays(week[week.length - 1].date, 1);
+  const theirs = view.events.filter((event) => !event.allDay && new Date(event.end) > from && new Date(event.start) < to);
+  const windows = freeTogether(week, [...theirs, ...myBusyRanges(from, to)], { dayStart: settings().dayStart, dayEnd: settings().dayEnd, minHours: 1 }).slice(0, 8);
+  const chips = windows
+    .map(
+      (window) => `<button type="button" class="together-chip" data-together="${window.start.getTime()}-${window.end.getTime()}">
+        <strong>${escapeHtml(formatDayStamp(window.start))}</strong><span>${escapeHtml(formatClock(window.start))} – ${escapeHtml(formatClock(window.end))}</span></button>`
+    )
+    .join("");
+  box.innerHTML = `<p class="field-label">You're both free</p>${
+    windows.length
+      ? `<div class="together-list">${chips}</div><p class="form-hint">Tap a time to plan it with ${escapeHtml(first)}.${
+          theirs.length ? "" : ` Nothing is on ${escapeHtml(first)}'s shared calendar this week, so these may just be your free times.`
+        }</p>`
+      : `<p class="form-hint">No free time in common left this week. Try next week.</p>`
+  }`;
+}
+
+$("freeTogether").addEventListener("click", (event) => {
+  const chip = event.target.closest("[data-together]");
+  const view = ui.friendCalendar;
+  if (!chip || !view) return;
+  const [start, end] = chip.dataset.together.split("-").map(Number);
+  // A 1-on-1 plan starts as two hours at most; the time can still be changed.
+  startOneOnOne(view.id, { start: new Date(start), end: new Date(Math.min(end, start + 2 * 3600 * 1000)) });
+});
+
+$("friendPlanButton").addEventListener("click", () => {
+  if (ui.friendCalendar) startOneOnOne(ui.friendCalendar.id);
+});
+
+/**
+ * Opens the 1-on-1 space with one friend, making it the first time. `when`
+ * ({ start, end }) opens the plan form at that time. Both friends reach the
+ * same space (see pairSlug), so it is never made twice.
+ */
+async function startOneOnOne(friendId, when = null) {
+  if (!friends.loaded) await loadFriends();
+  const entry = acceptedFriends().find(({ party }) => party.id === friendId);
+  if (!entry) {
+    showToast("You can plan a 1-on-1 once you're friends.");
+    return;
+  }
+  const { row, party } = entry;
+  const slug = await pairSlug(row.id);
+  const setup = {
+    name: `${displayName().split(" ")[0]} & ${party.name.split(" ")[0]}`.slice(0, 60),
+    friend: { id: party.id, name: party.name, email: party.email || "" },
+    window: when ? { start: when.start.toISOString(), end: when.end.toISOString() } : null,
+  };
+  if (slug === session.slug) {
+    for (const dialog of [dialogs.friends, dialogs.friendCalendar]) if (dialog.open) dialog.close();
+    await setUpPair(setup);
+    if (!when) showToast(`This is your 1-on-1 with ${party.name.split(" ")[0]}.`);
+    return;
+  }
+  rememberSetup(slug, setup);
+  window.location.href = groupUrl(slug);
+}
+
+/** First visit to a 1-on-1: name it, lock it to the two of you, and add your friend. */
+async function setUpPair({ name, friend, window: when }) {
+  if (!friend?.id || !isPairSlug(session.slug)) return;
+  const fresh = groupKind() !== "pair";
+  const party = { id: friend.id, name: String(friend.name || "Your friend").slice(0, 60), email: friend.email || "" };
+  const present = findMemberForParty(session.state.members, party);
+  if (fresh || !present || present.userId !== party.id) {
+    await mutate(
+      (draft) => {
+        if (draft.kind !== "pair") {
+          draft.kind = "pair";
+          if (name) draft.name = name;
+          // Only the two of you can change it.
+          if (ui.user) {
+            draft.settings.locked = true;
+            draft.ownerId = draft.ownerId || ui.user.id;
+            const mine = draft.members.find((entry) => entry.id === memberId);
+            if (mine) mine.userId = ui.user.id;
+          }
+        }
+        const already = findMemberForParty(draft.members, party);
+        if (already) {
+          linkMemberToParty(already, party);
+          return;
+        }
+        draft.members.push({
+          id: createId("member"),
+          name: party.name,
+          initials: initialsFor(party.name),
+          palette: AVATAR_PALETTES[draft.members.length % AVATAR_PALETTES.length],
+          userId: party.id,
+          ...(party.email ? { email: normalizeEmail(party.email) } : {}),
+          pending: true,
+          weekly: [],
+          busy: [],
+          updatedAt: new Date().toISOString(),
+        });
+      },
+      { note: fresh ? `1-on-1 started: ${name || session.state.name}` : `${party.name} joined the 1-on-1` }
+    );
+  }
+  if (when?.start && when?.end) {
+    ui.pendingWindow = { start: new Date(when.start), end: new Date(when.end) };
+    openPlanDialog();
+  }
 }
 
 async function openFriendCalendar(friendId, name) {
@@ -3815,6 +4219,7 @@ async function start() {
 
   await loadWorkspace();
   await applyPendingName();
+  await syncBlockedToGroup();
   // Behind the sign-in gate nothing about the group is known, not even its name.
   if (!session.needsSignIn) recordVisit();
   await loadFriends();

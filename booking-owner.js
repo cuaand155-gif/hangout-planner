@@ -96,9 +96,14 @@ export function initBookingOwner(app) {
       : "You haven't connected a calendar yet (sidebar → Calendar links). Until you do, only your hours and existing bookings count.";
   }
 
-  /** Busy times to store with the page: none when the owner turned calendars off. */
+  /**
+   * Busy times to store with the page: calendars only when the owner keeps
+   * them on, and always-busy hours no matter what.
+   */
   function busyFor(settings) {
-    return settings.useCalendars ? busyForBooking(app.calendarEvents(), { windowDays: settings.windowDays }) : [];
+    const blocked = app.blockedEvents ? app.blockedEvents(settings.windowDays) : [];
+    const events = settings.useCalendars ? [...app.calendarEvents(), ...blocked] : blocked;
+    return busyForBooking(events, { windowDays: settings.windowDays });
   }
 
   function renderShare(page) {

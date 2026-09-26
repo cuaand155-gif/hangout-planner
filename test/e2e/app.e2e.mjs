@@ -1581,3 +1581,224 @@ describe("home screen app", () => {
     assert.match(await page.locator("#installSteps").innerText(), /In Safari, tap Share\s+then Add to Home Screen/);
   });
 });
+
+const DANA = "44444444-4444-4444-4444-444444444444";
+
+/** Monday of next week at `hour`:00 local, as the grid's data-iso and a Date. */
+const nextMonday = (page, hour = 0) =>
+  page.evaluate((h) => {
+    const date = new Date();
+    date.setHours(h, 0, 0, 0);
+    date.setDate(date.getDate() + ((8 - date.getDay()) % 7 || 7));
+    const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    return { iso, time: date.getTime() };
+  }, hour);
+
+describe("friends without a group", () => {
+  browserTest("the Friends page: a request by phone number, accepted by the person with that number", { signedIn: true }, async ({ page, go, open }) => {
+    await go("/");
+    await page.locator("#friendsButton").click();
+    await page.locator("#friendsDialog").waitFor();
+    assert.match(await page.locator("#friendList").innerText(), /Sam Rivera[\s\S]*Calendar[\s\S]*1-on-1/);
+
+    await page.fill("#friendRequestEmail", "555-0123");
+    await page.locator("#sendFriendRequest").click();
+    await toastSays(page, /does not look like a phone number/);
+    await page.fill("#friendRequestEmail", "(416) 555-0123");
+    await page.locator("#sendFriendRequest").click();
+    await toastSays(page, /Friend request sent/);
+    assert.match(await page.locator("#outgoingList").innerText(), /\+1 416 555 0123[\s\S]*Waiting for them to sign in/);
+    const requests = await fakeRows(page, "friend_requests");
+    const sent = requests.filter((row) => row.recipient_phone);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].recipient_phone, "+14165550123", "stored in one format");
+    assert.equal("recipient_email" in sent[0], false, "no email column for a phone request");
+    await page.fill("#friendRequestEmail", "+1 416 555 0123");
+    await page.locator("#sendFriendRequest").click();
+    await toastSays(page, /already have a request waiting/);
+
+    // Dana signed up with that number.
+    const dana = await open({ as: "dana", seed: { friend_requests: requests } });
+    await dana.go("/");
+    await dana.page.waitForFunction(() => document.querySelector("#friendsNavBadge")?.textContent === "1" && !document.querySelector("#friendsNavBadge").hidden);
+    await dana.page.locator("#friendsButton").click();
+    assert.match(await dana.page.locator("#incomingList").innerText(), /Alexi/);
+    await dana.page.locator("#incomingList [data-accept]").click();
+    await toastSays(dana.page, /You're now friends/);
+    assert.match(await dana.page.locator("#friendList").innerText(), /Alexi[\s\S]*1-on-1/);
+    const row = (await fakeRows(dana.page, "friend_requests")).find((entry) => entry.id === sent[0].id);
+    assert.equal(row.status, "accepted");
+    assert.equal(row.recipient_id, DANA);
+  });
+
+  browserTest("sign in with a phone number and a texted code", { signedIn: true, as: "none" }, async ({ page, go }) => {
+    await go("/");
+    await page.locator("#friendsButton").click();
+    assert.equal(await page.locator("#friendsSignedIn").isHidden(), true);
+    await page.locator("#friendsSignInButton").click();
+    await page.locator("#accountDialog").waitFor();
+    await page.fill("#phoneNumber", "555");
+    await page.locator("#phoneSendCode").click();
+    await toastSays(page, /doesn't look like a phone number/);
+    await page.fill("#phoneNumber", "416 555 0123");
+    await page.locator("#phoneSendCode").click();
+    await page.locator("#phoneCodeRow").waitFor();
+    assert.match(await page.locator("#phoneHint").innerText(), /texted a code to \+1 416 555 0123/);
+    const sends = await page.evaluate(() => window.__calls.filter((call) => call[1] === "signInWithOtp"));
+    assert.deepEqual(sends, [["auth", "signInWithOtp", "+14165550123"]]);
+    await page.fill("#phoneCode", "000000");
+    await page.locator("#phoneVerify").click();
+    await toastSays(page, /That code didn't work/);
+    await page.fill("#phoneCode", "123 456");
+    await page.locator("#phoneVerify").click();
+    await toastSays(page, /Signed in/);
+    await page.waitForFunction(() => !document.querySelector("#accountDialog").open);
+    await page.locator("#friendsButton").click();
+    await page.locator("#friendsSignedIn").waitFor();
+    await page.locator("#friendsDialog .close-dialog").click();
+    await page.locator("#accountButton").click();
+    await page.locator("#openAccountFromProfile").click();
+    assert.equal(await page.locator("#accountStatus").innerText(), "Signed in");
+    assert.match(await page.locator("#accountStatusDetail").innerText(), /\+1 416 555 0123/);
+    assert.equal(await page.locator("#phoneSignInForm").isHidden(), true);
+  });
+
+  browserTest("a 1-on-1 with a friend: free together, plan it, and it's the same space every time", { signedIn: true }, async ({ page, go, open }) => {
+    await go("/");
+    await page.locator("#friendsButton").click();
+    await page.locator('#friendList [data-view-calendar][data-friend-name="Sam Rivera"]').click();
+    await page.locator("#friendCalendarDialog").waitFor();
+    await page.locator("#friendNextWeek").click();
+    await page.locator("#freeTogether [data-together]").first().waitFor();
+    assert.match(await page.locator("#freeTogether").innerText(), /You're both free/i);
+    const [start] = (await page.locator("#freeTogether [data-together]").first().getAttribute("data-together")).split("-").map(Number);
+
+    await Promise.all([page.waitForURL(/\?w=1on1-[a-f0-9]{16}$/), page.locator("#freeTogether [data-together]").first().click()]);
+    const slug = new URL(page.url()).searchParams.get("w");
+    await page.waitForFunction(() => document.querySelector("#tentativePlanDialog")?.open);
+    assert.equal(await page.locator("#planWhen").isHidden(), false, "the plan opens at the time you picked");
+    await page.fill("#planActivity", "Coffee");
+    await page.locator("#tentativePlanForm button[type=submit]").click();
+    await toastSays(page, /Tentative plan saved/);
+    assert.equal(await page.locator("#groupKindLabel").innerText(), "1-on-1");
+    assert.equal(await page.locator("#workspaceName").innerText(), "Alexi & Sam");
+    const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem(`gatherly-workspace:${key}`)), slug);
+    assert.equal(saved.kind, "pair");
+    assert.equal(saved.settings.locked, true, "only the two of you can change it");
+    assert.deepEqual(saved.members.map((member) => member.userId).sort(), [ALEXI, SAM]);
+    assert.equal(new Date(saved.plan.chosen).getTime(), start);
+
+    // Starting it again opens the same space, without adding Sam twice.
+    await page.locator("#friendsButton").click();
+    await page.locator(`#friendList [data-one-on-one="${SAM}"]`).click();
+    await toastSays(page, /This is your 1-on-1 with Sam/);
+    assert.equal(new URL(page.url()).searchParams.get("w"), slug);
+    const again = await page.evaluate((key) => JSON.parse(localStorage.getItem(`gatherly-workspace:${key}`)), slug);
+    assert.equal(again.members.length, 2);
+    // Groups offer "Add to this group"; a 1-on-1 has nobody else to add.
+    assert.equal(await page.locator("#friendList [data-add-friend]").count(), 0);
+
+    // Sam reaches the same space from their side.
+    const sam = await open({ as: "sam" });
+    await sam.go("/");
+    await sam.page.locator("#friendsButton").click();
+    await Promise.all([sam.page.waitForURL(new RegExp(`\\?w=${slug}$`)), sam.page.locator(`#friendList [data-one-on-one="${ALEXI}"]`).click()]);
+  });
+});
+
+describe("organization groups", () => {
+  browserTest("an organization group is free/busy only and can't be switched to event details", {}, async ({ page, go }) => {
+    await go("/");
+    await page.locator("#groupsButton").click();
+    await page.fill("#newGroupName", "Robotics team");
+    await page.locator('input[name="newGroupKind"][value="organization"]').check();
+    await Promise.all([page.waitForURL(/\?w=robotics-team-[a-z2-9]{5}$/), page.locator("#newGroupForm button[type=submit]").click()]);
+    const slug = new URL(page.url()).searchParams.get("w");
+    await page.waitForFunction(() => document.querySelector("#workspaceName")?.textContent === "Robotics team");
+    assert.equal(await page.locator("#groupKindLabel").innerText(), "Organization");
+    assert.equal(await page.locator("#privacyStatus").innerText(), "Free / busy only, always");
+    const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem(`gatherly-workspace:${key}`)), slug);
+    assert.equal(saved.kind, "organization");
+    assert.equal(saved.privacy, "busy");
+
+    await page.locator("#privacyButton").click();
+    assert.equal(await page.locator('input[name="privacy"][value="details"]').isDisabled(), true);
+    assert.equal(await page.locator("#privacyOrgNote").isHidden(), false);
+    await page.locator("#privacyDialog .privacy-option").nth(1).click({ force: true });
+    assert.equal(await page.locator('input[name="privacy"][value="busy"]').isChecked(), true, "details can't be picked");
+    await page.locator("#privacyDialog .close-dialog").click();
+
+    // Switching the type back to friends is a setting like any other.
+    await page.locator("#settingsButton").click();
+    assert.equal(await page.locator("#settingGroupKind").inputValue(), "organization");
+    await page.selectOption("#settingGroupKind", "friends");
+    await page.locator("#settingsForm button[type=submit]").click();
+    await toastSays(page, /Settings saved/);
+    assert.equal(await page.locator("#groupKindLabel").innerText(), "Group");
+    assert.equal(await page.locator('input[name="privacy"][value="details"]').isDisabled(), false);
+  });
+});
+
+describe("always busy", () => {
+  const bookingPage = { id: "p1", owner_id: ALEXI, handle: "alexi", title: "Coffee chat", owner_name: "Alexi", settings: { useCalendars: false }, busy: [], ics_urls: [], active: true, feed_token: "f".repeat(32) };
+  browserTest("block the same hours every week: groups, friends, your booking link and your other devices get them, labels stay private", { signedIn: true, seed: { booking_pages: [bookingPage] } }, async ({ page, go }) => {
+    await go("/");
+    await page.locator("#blockedButton").click();
+    await page.locator("#blockedDialog").waitFor();
+    await page.locator('[data-blocked-preset="work"]').click();
+    await toastSays(page, /Work: Mon–Fri · 9 am – 5 pm, blocked every week/);
+    assert.match(await page.locator("#blockedList").innerText(), /Work\s+Mon–Fri · 9 am – 5 pm/);
+    assert.equal(await page.locator('[data-blocked-preset="work"]').isDisabled(), true, "the same rule can't be added twice");
+
+    // A custom overnight rule on Saturdays.
+    for (const day of [1, 2, 3, 4, 5]) await page.locator(`#blockedDays input[value="${day}"]`).uncheck({ force: true });
+    await page.locator('#blockedDays input[value="6"]').check({ force: true });
+    await page.fill("#blockedStart", "23:00");
+    await page.fill("#blockedEnd", "07:00");
+    await page.fill("#blockedLabel", "Sleep in");
+    await page.locator("#blockedForm button[type=submit]").click();
+    await toastSays(page, /Sat · 11 pm – 7 am \(overnight\), blocked every week/);
+    assert.equal(await page.locator("#blockedList .blocked-row").count(), 2);
+
+    // The group gets the times on your row, never the labels.
+    const mine = () => page.evaluate((id) => JSON.parse(localStorage.getItem("gatherly-workspace:weekend-crew")).members.find((member) => member.userId === id), ALEXI);
+    await page.waitForFunction((id) => (JSON.parse(localStorage.getItem("gatherly-workspace:weekend-crew")).members.find((m) => m.userId === id)?.blocked || []).length === 2, ALEXI);
+    assert.deepEqual((await mine()).blocked, [
+      { days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" },
+      { days: [6], start: "23:00", end: "07:00" },
+    ]);
+    assert.doesNotMatch(await page.evaluate(() => localStorage.getItem("gatherly-workspace:weekend-crew")), /Sleep in|"Work"/);
+
+    // Friends see it as plain busy time.
+    const monday = await nextMonday(page, 9);
+    await page.waitForFunction(
+      ({ sam, at }) => (window.__fakeDb.calendar_shares.find((row) => row.viewer_id === sam && row.owner_id !== sam)?.events || []).some((event) => new Date(event.start).getTime() === at),
+      { sam: SAM, at: monday.time }
+    );
+    const shared = (await shareRow(page, SAM)).events.find((event) => new Date(event.start).getTime() === monday.time);
+    assert.equal(new Date(shared.end).getHours(), 17);
+    assert.equal("title" in shared, false);
+
+    // Your booking link keeps them closed, even with calendars switched off for it.
+    await page.waitForFunction((at) => (window.__fakeDb.booking_pages[0]?.busy || []).some((range) => new Date(range.start).getTime() === at), monday.time);
+    const booked = (await fakeRows(page, "booking_pages"))[0].busy.find((range) => new Date(range.start).getTime() === monday.time);
+    assert.deepEqual(Object.keys(booked).sort(), ["end", "start"], "times only");
+
+    // Your other devices get the rules, labels included (your own settings row).
+    await page.waitForFunction(() => (window.__fakeDb.sharing_settings[0]?.settings?.blocked || []).length === 2);
+
+    await page.locator("#blockedDialog .close-dialog").click();
+    await page.locator("#mineViewTab").click();
+    await page.locator("#nextWeek").click();
+    assert.match(await page.locator(`.slot[data-iso="${monday.iso}"][data-hour="10"]`).getAttribute("class"), /\bbusy\b/);
+    assert.doesNotMatch(await page.locator(`.slot[data-iso="${monday.iso}"][data-hour="18"]`).getAttribute("class"), /\bbusy\b/);
+
+    // Removing a rule frees those hours again.
+    await page.locator("#mineBlockedButton").click();
+    await page.locator("#blockedList [data-remove-blocked]").first().click();
+    await toastSays(page, /Those hours are free again/);
+    await page.waitForFunction((id) => (JSON.parse(localStorage.getItem("gatherly-workspace:weekend-crew")).members.find((m) => m.userId === id)?.blocked || []).length === 1, ALEXI);
+    await page.locator("#blockedDialog .close-dialog").click();
+    assert.doesNotMatch(await page.locator(`.slot[data-iso="${monday.iso}"][data-hour="10"]`).getAttribute("class"), /\bbusy\b/);
+  });
+});

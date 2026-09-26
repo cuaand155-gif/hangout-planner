@@ -67,10 +67,13 @@ begin
   insert into public.profiles (id, display_name)
   values (
     new.id,
+    -- Someone who signs in with a phone number has no email, and a name is
+    -- required: they start as "New friend" and pick their own in Profile.
     coalesce(
       new.raw_user_meta_data ->> 'full_name',
       new.raw_user_meta_data ->> 'name',
-      split_part(new.email, '@', 1)
+      nullif(split_part(coalesce(new.email, ''), '@', 1), ''),
+      'New friend'
     )
   )
   on conflict (id) do nothing;
@@ -94,10 +97,10 @@ create trigger on_auth_user_created
 -- One row per request. A friendship is simply a row whose status is
 -- 'accepted', so there is no second table to keep in step.
 --
--- Requests are addressed to an email rather than a user id, so you can invite
--- somebody who has not signed up yet: recipient_id stays null until they
--- accept. That is also why the policies below match on the email in the
--- caller's token as well as on their id.
+-- Requests are addressed to an email or a phone number rather than a user id,
+-- so you can invite somebody who has not signed up yet: recipient_id stays
+-- null until they accept. That is also why the policies below match on the
+-- email or phone in the caller's token as well as on their id.
 
 create table if not exists public.friend_requests (
   id uuid primary key default gen_random_uuid(),
@@ -111,14 +114,36 @@ create table if not exists public.friend_requests (
   constraint friend_requests_not_self check (requester_id is distinct from recipient_id)
 );
 
+-- Requests by phone number (E.164, "+15551234567"). Such a row has no email,
+-- so the email column may be empty as long as one of the two is there.
+alter table public.friend_requests add column if not exists recipient_phone text
+  check (recipient_phone is null or recipient_phone ~ '^\+[1-9][0-9]{7,14}$');
+alter table public.friend_requests alter column recipient_email drop not null;
+alter table public.friend_requests drop constraint if exists friend_requests_has_recipient;
+alter table public.friend_requests add constraint friend_requests_has_recipient
+  check (recipient_email is not null or recipient_phone is not null);
+
+-- The phone in a Supabase token has no "+", so numbers are compared as digits.
+create or replace function public.phone_digits(value text)
+returns text
+language sql
+immutable
+set search_path = public
+as $$ select nullif(regexp_replace(coalesce(value, ''), '[^0-9]', '', 'g'), '') $$;
+
 -- Stops the same pair stacking up duplicate live requests. A declined request
 -- is excluded, so somebody can ask again later.
 create unique index if not exists friend_requests_live_pair
   on public.friend_requests (requester_id, lower(recipient_email))
-  where status in ('pending', 'accepted');
+  where status in ('pending', 'accepted') and recipient_email is not null;
+create unique index if not exists friend_requests_live_phone_pair
+  on public.friend_requests (requester_id, public.phone_digits(recipient_phone))
+  where status in ('pending', 'accepted') and recipient_phone is not null;
 
 create index if not exists friend_requests_recipient_email
   on public.friend_requests (lower(recipient_email));
+create index if not exists friend_requests_recipient_phone
+  on public.friend_requests (public.phone_digits(recipient_phone));
 
 alter table public.friend_requests enable row level security;
 
@@ -132,6 +157,7 @@ create policy "Requests are visible to both sides"
     auth.uid() = requester_id
     or auth.uid() = recipient_id
     or lower(recipient_email) = lower(auth.jwt() ->> 'email')
+    or public.phone_digits(recipient_phone) = public.phone_digits(auth.jwt() ->> 'phone')
   );
 
 drop policy if exists "Users send their own requests" on public.friend_requests;
@@ -140,7 +166,8 @@ create policy "Users send their own requests"
   with check (
     auth.uid() = requester_id
     and recipient_id is null
-    and lower(recipient_email) <> lower(coalesce(auth.jwt() ->> 'email', ''))
+    and (recipient_email is null or lower(recipient_email) <> lower(coalesce(auth.jwt() ->> 'email', '')))
+    and (recipient_phone is null or public.phone_digits(recipient_phone) is distinct from public.phone_digits(auth.jwt() ->> 'phone'))
   );
 
 -- Only the recipient answers a request, and answering cannot rewrite who it
@@ -158,6 +185,7 @@ create policy "Recipients answer their requests"
   using (
     auth.uid() = recipient_id
     or lower(recipient_email) = lower(auth.jwt() ->> 'email')
+    or public.phone_digits(recipient_phone) = public.phone_digits(auth.jwt() ->> 'phone')
   )
   with check (
     auth.uid() = recipient_id
@@ -172,6 +200,7 @@ create policy "Either side can remove a request"
     auth.uid() = requester_id
     or auth.uid() = recipient_id
     or lower(recipient_email) = lower(auth.jwt() ->> 'email')
+    or public.phone_digits(recipient_phone) = public.phone_digits(auth.jwt() ->> 'phone')
   );
 
 -- ---------------------------------------------------------------------------

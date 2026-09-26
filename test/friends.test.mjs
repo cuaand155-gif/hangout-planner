@@ -7,6 +7,7 @@ import {
   isValidEmail,
   partitionRequests,
   profileIdsFor,
+  recipientFor,
   rejectionFor,
 } from "../lib/friends.js";
 
@@ -200,4 +201,42 @@ test("a failed list surfaces the error instead of pretending it is empty", async
   const { data, error } = await createFriendStore(client).list();
   assert.deepEqual(data, []);
   assert.equal(error.message, "denied");
+});
+
+test("requests can be addressed to a phone number", () => {
+  const byPhone = row({ recipient_email: null, recipient_phone: "+14165550123" });
+  const phoneUser = { userId: "me", email: "", phone: "14165550123" };
+  assert.equal(addressedToMe(byPhone, phoneUser), true, "Supabase keeps the number without its +");
+  assert.equal(addressedToMe(byPhone, ME), false);
+  const { incoming } = partitionRequests([byPhone], phoneUser);
+  assert.equal(incoming.length, 1);
+
+  const sent = row({ requester_id: "me", recipient_email: null, recipient_phone: "+14165550123" });
+  const again = row({ requester_id: "me", recipient_email: null, recipient_phone: "+14165550123", created_at: "2026-09-20T10:00:00Z" });
+  const { outgoing } = partitionRequests([sent, again], ME);
+  assert.equal(outgoing.length, 1, "one entry per number");
+  const party = describeParty(sent, { userId: "me", profiles: {} });
+  assert.equal(party.name, "+1 416 555 0123");
+  assert.equal(party.pendingSignup, true);
+});
+
+test("the request box takes an email or a phone number", () => {
+  assert.deepEqual(recipientFor("Jordan@Example.com"), { email: "jordan@example.com" });
+  assert.deepEqual(recipientFor("(416) 555-0123"), { phone: "+14165550123" });
+  assert.equal(recipientFor("555-0123"), null);
+  const rows = [row({ requester_id: "me", recipient_email: null, recipient_phone: "+14165550123" })];
+  assert.match(rejectionFor("555-0123", { ...ME, rows }), /does not look like a phone number/);
+  assert.match(rejectionFor("416 555 0123", { ...ME, rows }), /already have a request/);
+  assert.match(rejectionFor("+1 647 555 0000", { ...ME, phone: "16475550000", rows }), /your own number/);
+  assert.equal(rejectionFor("647-555-0199", { ...ME, rows }), null);
+});
+
+test("a phone request stores only the phone column", async () => {
+  const inserted = [];
+  const client = { from: () => ({ insert: (value) => (inserted.push(value), Promise.resolve({ error: null })) }) };
+  const store = createFriendStore(client);
+  await store.send({ requesterId: "me", phone: "416 555 0123", note: "hi" });
+  await store.send({ requesterId: "me", email: "Sam@Example.com" });
+  assert.deepEqual(inserted[0], { requester_id: "me", recipient_phone: "+14165550123", note: "hi", status: "pending" });
+  assert.deepEqual(inserted[1], { requester_id: "me", recipient_email: "sam@example.com", note: null, status: "pending" });
 });

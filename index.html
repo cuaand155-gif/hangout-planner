@@ -35,6 +35,8 @@
           <a class="nav-item" href="#ideas"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-sparkle"/></svg></span>Activity ideas</a>
         </nav>
         <div class="sidebar-bottom">
+          <button class="nav-item nav-button" id="friendsButton"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-users"/></svg></span>Friends <span id="friendsNavBadge" class="count-badge" hidden></span></button>
+          <button class="nav-item nav-button" id="blockedButton"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg></span>Always busy</button>
           <button class="nav-item nav-button" id="bookingButton"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg></span>Booking link</button>
           <button class="nav-item nav-button" id="groupsButton"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-groups"/></svg></span>Your groups</button>
           <button class="nav-item nav-button" id="calendarButton"><span class="nav-icon"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></span>Calendar links</button>
@@ -54,13 +56,14 @@
           <h1 id="gateTitle">Sign in to join this group</h1>
           <p>Groups share when people are free, so only signed-in people can open them. It's free and takes one tap with Google.</p>
           <button class="primary-button full" type="button" id="gateSignIn">Sign in with Google</button>
+          <button class="outline-button full" type="button" id="gatePhone">Use my phone number</button>
           <a class="text-button" href="/">Just looking? Try the demo group</a>
         </div>
       </section>
       <main class="main-content">
         <header class="topbar">
           <button class="mobile-menu" id="mobileMenu" aria-label="Open menu" aria-expanded="false"><svg class="icon" aria-hidden="true"><use href="#i-menu"/></svg></button>
-          <div class="breadcrumb"><span>Group</span><b>/</b><button class="breadcrumb-switch" id="switchGroup" aria-label="Switch group"><strong id="workspaceName">Weekend crew</strong><span aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#i-caret"/></svg></span></button></div>
+          <div class="breadcrumb"><span id="groupKindLabel">Group</span><b>/</b><button class="breadcrumb-switch" id="switchGroup" aria-label="Switch group"><strong id="workspaceName">Weekend crew</strong><span aria-hidden="true"><svg class="icon" aria-hidden="true"><use href="#i-caret"/></svg></span></button></div>
           <div class="top-actions">
             <button class="icon-button" id="activityButton" aria-label="Recent activity"><svg class="icon" aria-hidden="true"><use href="#i-bell"/></svg><i id="activityDot" hidden></i></button>
             <button class="avatar avatar-lilac account-avatar" id="topAccountButton" aria-label="Open your profile">AM</button>
@@ -192,6 +195,7 @@
             <div class="mine-actions" id="mineActions" hidden>
               <button class="outline-button" id="saveUsualWeek">Save as my usual week</button>
               <button class="outline-button" id="clearMyWeek">I’m free all week</button>
+              <button class="outline-button" id="mineBlockedButton"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg> Always busy times</button>
             </div>
           </section>
 
@@ -264,6 +268,7 @@
         <label class="privacy-option active"><input type="radio" name="privacy" value="busy" checked /><span class="radio"></span><span><strong>Busy / free only</strong><small>Show available time blocks without event names or locations.</small></span></label>
         <label class="privacy-option"><input type="radio" name="privacy" value="details" /><span class="radio"></span><span><strong>Show event details</strong><small>Lets names through to this group — but only the events each person allows under My calendar → Who sees what.</small></span></label>
       </div>
+      <p class="privacy-note" id="privacyOrgNote" hidden><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg> <strong>This is an organization group.</strong> It only ever shows when people are free or busy. Change the group type in Settings to share more.</p>
       <p class="privacy-note"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg> <strong>Switching back removes titles.</strong> Event names already imported are stripped from your shared times.</p>
       <button class="primary-button full" id="savePrivacy">Save privacy setting</button>
     </dialog>
@@ -295,6 +300,22 @@
       <p class="dialog-copy" id="accountCopy">Sign in to keep your groups and availability wherever you plan.</p>
       <div class="account-status"><span class="account-status-dot" id="accountStatusDot"></span><div><strong id="accountStatus">Not signed in</strong><small id="accountStatusDetail">Your local planner session is active.</small></div></div>
       <button class="google-button" id="googleSignInButton"><span class="google-logo">G</span> Continue with Google</button>
+      <form id="phoneSignInForm" class="phone-signin">
+        <p class="auth-divider"><span>or use your phone</span></p>
+        <label class="field-label" for="phoneNumber">Phone number</label>
+        <div class="copy-row">
+          <input class="text-input" id="phoneNumber" type="tel" inputmode="tel" autocomplete="tel" placeholder="416 555 0123" maxlength="24" />
+          <button class="outline-button" type="submit" id="phoneSendCode">Text me a code</button>
+        </div>
+        <div id="phoneCodeRow" hidden>
+          <label class="field-label" for="phoneCode">The 6-digit code we texted you</label>
+          <div class="copy-row">
+            <input class="text-input" id="phoneCode" inputmode="numeric" autocomplete="one-time-code" maxlength="10" />
+            <button class="primary-button" type="button" id="phoneVerify">Sign in</button>
+          </div>
+        </div>
+        <p class="form-hint" id="phoneHint">No password: we text you a one-time code. Outside North America, start with + and your country code.</p>
+      </form>
       <button class="outline-button full" id="signOutButton" hidden>Sign out</button>
       <p class="auth-note" id="authNote">Signing in links this planner to your Google account so your name and availability follow you between devices.</p>
     </dialog>
@@ -346,10 +367,23 @@
         <p class="form-hint">They’ll show as waiting for times until they open the link and add their own.</p>
         <button class="primary-button full" type="submit">Add to this group</button>
       </form>
-      <div id="friendsPanel" class="people-form" hidden>
+      <form id="groupForm" class="people-form" hidden>
+        <label class="field-label" for="groupName">Group name</label>
+        <input class="text-input" id="groupName" placeholder="Weekend crew" required maxlength="60" />
+        <p class="form-hint">This is the name everyone sees at the top of the planner.</p>
+        <button class="primary-button full" type="submit">Save group name</button>
+      </form>
+      <p class="eyebrow roster-label">IN THIS GROUP</p>
+      <div class="saved-people" id="savedPeople"></div>
+    </dialog>
+
+    <dialog id="friendsDialog" class="wide-dialog">
+      <div class="dialog-header"><div><p class="eyebrow">FRIENDS</p><h2>Your people, one by one.</h2></div><button class="close-dialog" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+      <p class="dialog-copy">Friends don't need a group. Add someone by email or phone number, see what they choose to share, and plan a 1-on-1.</p>
+      <div id="friendsPanel">
         <div id="friendsSignedOut" hidden>
-          <p class="form-hint">Friend requests need an account, so both people can be reached. The invite link above works too; they sign in with Google when they open it.</p>
-          <button class="google-button" id="friendsSignInButton" type="button"><span class="google-logo">G</span> Continue with Google</button>
+          <p class="form-hint">Friends need an account, so only the two of you can see what you share. Sign in with Google or your phone number.</p>
+          <button class="primary-button full" id="friendsSignInButton" type="button">Sign in</button>
         </div>
         <div id="friendsSignedIn" hidden>
           <div class="status-card" id="statusCard">
@@ -360,10 +394,10 @@
           <form id="friendRequestForm">
             <label class="field-label" for="friendRequestEmail">Send a friend request</label>
             <div class="copy-row">
-              <input class="text-input" id="friendRequestEmail" type="email" placeholder="jordan@example.com" maxlength="120" />
+              <input class="text-input" id="friendRequestEmail" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Email or phone number" maxlength="120" />
               <button class="outline-button" type="submit" id="sendFriendRequest">Send</button>
             </div>
-            <p class="form-hint">They'll see it the next time they sign in, even if they don't have an account yet.</p>
+            <p class="form-hint">They'll see it the next time they sign in with that email or number, even if they don't have an account yet.</p>
           </form>
           <div class="friend-section" id="incomingSection" hidden>
             <p class="eyebrow">WAITING FOR YOU</p>
@@ -379,14 +413,6 @@
           </div>
         </div>
       </div>
-      <form id="groupForm" class="people-form" hidden>
-        <label class="field-label" for="groupName">Group name</label>
-        <input class="text-input" id="groupName" placeholder="Weekend crew" required maxlength="60" />
-        <p class="form-hint">This is the name everyone sees at the top of the planner.</p>
-        <button class="primary-button full" type="submit">Save group name</button>
-      </form>
-      <p class="eyebrow roster-label">IN THIS GROUP</p>
-      <div class="saved-people" id="savedPeople"></div>
     </dialog>
 
     <dialog id="profileDialog">
@@ -446,6 +472,12 @@
       <form id="settingsForm">
         <label class="field-label" for="settingWorkspaceName">Group name</label>
         <input class="text-input" id="settingWorkspaceName" maxlength="60" required />
+        <label class="field-label" for="settingGroupKind">Group type</label>
+        <select class="text-input" id="settingGroupKind">
+          <option value="friends">Friends: event names only if the group allows them</option>
+          <option value="organization">Organization or business: free and busy only</option>
+        </select>
+        <p class="form-hint" id="groupKindHint">An organization, club, team or workplace never sees event names or places, only when people are free.</p>
         <div class="setting-grid">
           <div><label class="field-label" for="settingWeekStart">Week starts</label><select class="text-input" id="settingWeekStart"><option value="1">Monday</option><option value="0">Sunday</option></select></div>
           <div><label class="field-label" for="settingMinWindow">Shortest window</label><select class="text-input" id="settingMinWindow"></select></div>
@@ -457,6 +489,7 @@
         <button class="primary-button full" type="submit">Save settings</button>
       </form>
       <div class="setting-footer">
+        <button class="outline-button" id="settingsBlockedButton" type="button">Always busy times</button>
         <button class="outline-button" id="exportWorkspace" type="button">Export as JSON</button>
         <button class="outline-button danger" id="resetLocal" type="button">Reset this device</button>
       </div>
@@ -486,13 +519,14 @@
     </dialog>
 
     <dialog id="friendCalendarDialog" class="wide-dialog">
-      <div class="dialog-header"><div><p class="eyebrow">FRIEND</p><h2 id="friendCalendarTitle">Calendar</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <div class="dialog-header"><div><p class="eyebrow">FRIEND</p><h2 id="friendCalendarTitle">Calendar</h2></div><div class="dialog-header-actions"><button class="primary-button small" type="button" id="friendPlanButton"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg> Plan 1-on-1</button><button class="close-dialog" aria-label="Close">×</button></div></div>
       <div class="week-switcher friend-week">
         <button id="friendPrevWeek" aria-label="Previous week">‹</button>
         <strong id="friendWeekLabel">This week</strong>
         <button id="friendNextWeek" aria-label="Next week">›</button>
         <small id="friendCalendarUpdated"></small>
       </div>
+      <div class="free-together" id="freeTogether"></div>
       <div id="friendAgenda"></div>
     </dialog>
 
@@ -584,8 +618,34 @@
           <input class="text-input" id="newGroupName" placeholder="Book club" required maxlength="40" />
           <button class="primary-button" type="submit">Create</button>
         </div>
+        <div class="kind-options" role="radiogroup" aria-label="What kind of group">
+          <label class="kind-option"><input type="radio" name="newGroupKind" value="friends" checked /><span><strong>Friends</strong><small>Free and busy, plus event names people choose to share.</small></span></label>
+          <label class="kind-option"><input type="radio" name="newGroupKind" value="organization" /><span><strong>Organization or business</strong><small>A club, team or workplace. Always private: only free and busy, never event names.</small></span></label>
+        </div>
         <p class="form-hint">You'll get a private link to share. It ends in a random code, so nobody can find your group by guessing its name.</p>
       </form>
+    </dialog>
+
+    <dialog id="blockedDialog">
+      <div class="dialog-header"><div><p class="eyebrow">ALWAYS BUSY</p><h2>Times you're never free.</h2></div><button class="close-dialog" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+      <p class="dialog-copy">Block the same hours every week in one go. Your groups, friends and booking link see them as busy, never the label.</p>
+      <p class="field-label">Quick add</p>
+      <div class="preset-row" id="blockedPresets"></div>
+      <form id="blockedForm">
+        <p class="field-label">Or choose your own</p>
+        <div class="weekday-picker" id="blockedDays"></div>
+        <div class="setting-grid">
+          <div><label class="field-label" for="blockedStart">From</label><input class="text-input" type="time" id="blockedStart" step="900" value="09:00" required /></div>
+          <div><label class="field-label" for="blockedEnd">Until</label><input class="text-input" type="time" id="blockedEnd" step="900" value="17:00" required /></div>
+        </div>
+        <label class="field-label" for="blockedLabel">Label (only you see it)</label>
+        <input class="text-input" id="blockedLabel" maxlength="40" placeholder="Work, class, practice…" />
+        <p class="form-hint">An end before the start runs overnight, like 11 pm until 7 am.</p>
+        <button class="primary-button full" type="submit">Block these times</button>
+      </form>
+      <p class="field-label">Blocked every week</p>
+      <div class="blocked-list" id="blockedList"></div>
+      <p class="form-hint" id="blockedSyncNote"></p>
     </dialog>
 
     <dialog id="activityDialog">
