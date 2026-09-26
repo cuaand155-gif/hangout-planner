@@ -5,6 +5,14 @@
     {
       "source": "/book/:handle",
       "destination": "/book"
+    },
+    {
+      "source": "/g/:slug",
+      "destination": "/api/page?kind=g&slug=:slug"
+    },
+    {
+      "source": "/p/:slug",
+      "destination": "/api/page?kind=p&slug=:slug"
     }
   ],
   "headers": [
@@ -30,5 +38,13 @@
         }
       ]
     }
-  ]
+  ],
+  "functions": {
+    "api/page.js": {
+      "includeFiles": "index.html"
+    },
+    "api/og.js": {
+      "includeFiles": "api/_fonts/**"
+    }
+  }
 }

@@ -75,6 +75,19 @@ import { installMode, isStandalone, registerServiceWorker } from "./lib/pwa.js";
 import { REPEATS, applyRsvp, nextOccurrence, repeatLabel, rsvpAnswers, rsvpSummary, toggleTimeVote } from "./lib/hangout.js";
 import { guestUpdateFrom, isInviteCode, newGuestToken } from "./lib/guests.js";
 
+// Shared links look like /g/<group>?i=<code> (the group) or /p/<group>?i=<code>
+// (its plan), so chat apps can show a preview (api/page.js). Once open, the
+// app moves to its usual address: /?w=<group>&i=<code>.
+{
+  const pretty = /^\/([gp])\/([a-z0-9-]{1,64})\/?$/.exec(window.location.pathname);
+  if (pretty) {
+    const params = new URLSearchParams(window.location.search);
+    params.set("w", pretty[2]);
+    const order = new URLSearchParams([["w", pretty[2]], ...[...params].filter(([key]) => key !== "w")]);
+    window.history.replaceState(null, "", `/?${order}${pretty[1] === "p" ? "#plan" : window.location.hash}`);
+  }
+}
+
 // Browser-safe credentials: the publishable (anon) key is designed to ship in
 // client code. Row level security in supabase/schema.sql is what protects data.
 const AUTH_CONFIG = {
@@ -388,6 +401,7 @@ async function loadWorkspace() {
   await ensureMembership();
   render();
   if (!session.persisted) noteDemoMode();
+  if (window.location.hash === "#plan" && session.state.plan) $("tentativePlanSection").scrollIntoView({ block: "start" });
 }
 
 /** Guests change the group through one server action, never by saving the whole thing. */
@@ -1256,7 +1270,7 @@ function renderCalendarAdd(plan) {
     return;
   }
   row.hidden = false;
-  $("addToGoogle").href = googleCalendarUrl(plan, { url: inviteUrl() }) || "#";
+  $("addToGoogle").href = googleCalendarUrl(plan, { url: groupLink({ invite: false }) }) || "#";
 
   const record = addedRecords()[addedKey(plan)] || {};
   $("addToGoogle").textContent = record.google ? "Added to Google ✓" : "Google Calendar";
@@ -2160,12 +2174,59 @@ function inviteCode() {
   return invite && !invite.revoked ? invite.code : null;
 }
 
-function inviteUrl() {
-  const url = new URL(window.location.href);
+/**
+ * A link to this group. Shared links use /g/ (the group) or /p/ (its plan) so
+ * they get a preview in chats, and carry the invite code when there is one.
+ * `invite: false` gives the plain address, which needs an account or a pass
+ * (used in calendar exports, which can end up in front of other people).
+ */
+function groupLink({ kind = "g", invite = true } = {}) {
+  const origin = window.location.origin;
+  if (session.slug === DEMO_SLUG) return `${origin}/`;
+  if (!invite) return `${origin}/?w=${encodeURIComponent(session.slug)}`;
   const code = inviteCode();
-  url.search = session.slug === "weekend-crew" ? "" : `?w=${encodeURIComponent(session.slug)}${code ? `&i=${encodeURIComponent(code)}` : ""}`;
-  url.hash = "";
-  return url.toString();
+  return `${origin}/${kind}/${encodeURIComponent(session.slug)}${code ? `?i=${encodeURIComponent(code)}` : ""}`;
+}
+
+const inviteUrl = () => groupLink();
+
+/**
+ * Shares a link with the phone's share sheet where there is one, otherwise
+ * copies it. Returns "shared", "cancelled" or "copied".
+ */
+async function shareLink({ url, title, text, copied }) {
+  if (typeof navigator.share === "function") {
+    try {
+      await navigator.share({ title, text, url });
+      return "shared";
+    } catch (error) {
+      if (error?.name === "AbortError") return "cancelled";
+      // Not allowed here (no user gesture, an insecure page…): copy instead.
+    }
+  }
+  if (await copyText(url)) showToast(`${copied} Link copied.`);
+  else showToast(`${copied} Copy this link: ${url}`);
+  return "copied";
+}
+
+function shareGroup() {
+  return shareLink({
+    url: groupLink(),
+    title: `${session.state.name} on Waddle`,
+    text: `Mark when you're free so we can find a time for ${session.state.name}.`,
+    copied: "Group link ready.",
+  });
+}
+
+function sharePlan() {
+  const plan = session.state.plan;
+  if (!plan) return shareGroup();
+  return shareLink({
+    url: groupLink({ kind: "p" }),
+    title: `${plan.activity} · vote on a time`,
+    text: `Vote on a time for ${plan.activity}.`,
+    copied: "Plan link ready.",
+  });
 }
 
 async function copyText(value) {
@@ -2208,7 +2269,8 @@ $("inviteButton").addEventListener("click", () => {
     : "Anyone who signs in with this link can join and add their times.");
 });
 
-$("shareButton").addEventListener("click", () => shareInvite("Availability view shared."));
+$("shareButton").addEventListener("click", shareGroup);
+$("sharePlan").addEventListener("click", sharePlan);
 $("copyInviteLink").addEventListener("click", () => shareInvite("Invite link ready."));
 
 // "Plan something" under the selected window: the plan form opens with that time already picked.
@@ -2227,7 +2289,7 @@ $("addToGoogle").addEventListener("click", () => {
 
 $("downloadIcs").addEventListener("click", () => {
   const plan = session.state.plan;
-  const ics = plan && buildPlanIcs(plan, { slug: session.slug, url: inviteUrl() });
+  const ics = plan && buildPlanIcs(plan, { slug: session.slug, url: groupLink({ invite: false }) });
   if (!ics) return;
   const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
   const link = document.createElement("a");

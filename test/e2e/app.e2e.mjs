@@ -1196,7 +1196,7 @@ describe("people", () => {
     // Another group's link carries its code.
     await go("/?w=book-club-ab2cd");
     await page.locator("#inviteButton").click();
-    assert.equal(await page.locator("#inviteLink").inputValue(), `${state.base}/?w=book-club-ab2cd`);
+    assert.equal(await page.locator("#inviteLink").inputValue(), `${state.base}/g/book-club-ab2cd`, "a /g/ link, so chats show a preview");
   });
 });
 
@@ -1725,12 +1725,12 @@ describe("guests: invite links work without an account", () => {
     const alexi = await open({ signedIn: true });
     await alexi.go(`/?w=${SLUG}`);
     await alexi.page.locator("#managePeople").click();
-    assert.equal(await alexi.page.locator("#inviteLink").inputValue(), `${state.dbBase}/?w=${SLUG}&i=${CODE}`);
+    assert.equal(await alexi.page.locator("#inviteLink").inputValue(), `${state.dbBase}/g/${SLUG}?i=${CODE}`);
     assert.match(await alexi.page.locator("#savedPeople").innerText(), /Casey\s*Guest/);
     await alexi.page.locator("#revokeInvite").click();
     await toastSays(alexi.page, /Invite link turned off/);
     assert.equal((await db.group()).invite.revoked, true);
-    assert.equal(await alexi.page.locator("#inviteLink").inputValue(), `${state.dbBase}/?w=${SLUG}`, "no code to share while it's off");
+    assert.equal(await alexi.page.locator("#inviteLink").inputValue(), `${state.dbBase}/g/${SLUG}`, "no code to share while it's off");
 
     await go(`/?w=${SLUG}`, { app: true });
     await page.locator("#signInGate").waitFor();
@@ -1777,6 +1777,27 @@ describe("guests: invite links work without an account", () => {
     assert.match(await page.locator("#gateNote").innerText(), /no longer in this group/);
   });
 
+  browserTest("a /p/ link: chats get the plan's preview with no names, and people land on the plan", { db: true }, async ({ page, go }) => {
+    await seedGroup();
+    const html = await (await fetch(`${state.dbBase}/p/${SLUG}?i=${CODE}`)).text();
+    const tag = (name) => new RegExp(`<meta (?:property|name)="${name}" content="([^"]*)"`).exec(html)?.[1];
+    assert.equal(tag("og:title"), "Dinner · vote on a time");
+    assert.equal(tag("twitter:card"), "summary_large_image");
+    const head = html.slice(0, html.indexOf("</head>"));
+    for (const secret of ["Alexi", "Sam Rivera", "Climbing", "Basecamp", "Dentist", "Luma", "alexi@example.com"]) assert.ok(!head.includes(secret), `the preview mentions ${secret}`);
+    const image = await fetch(tag("og:image").replace(/&amp;/g, "&"));
+    assert.equal(image.headers.get("content-type"), "image/png");
+    assert.equal(Buffer.from(await image.arrayBuffer()).toString("ascii", 1, 4), "PNG");
+
+    await go(`/p/${SLUG}?i=${CODE}`);
+    assert.equal(page.url(), `${state.dbBase}/?w=${SLUG}&i=${CODE}#plan`, "the app moves to its usual address");
+    await page.locator("#guestJoinForm").waitFor();
+    await page.fill("#guestName", "Casey");
+    await page.locator("#guestJoinForm button[type=submit]").click();
+    await page.locator("#tentativePlanSection").waitFor();
+    assert.match(await page.locator("#tentativeTitle").innerText(), /Dinner/);
+  });
+
   browserTest("the join card and guest banner on a phone, in dark mode", { db: true, phone: true, theme: "dark" }, async ({ page, go }) => {
     await seedGroup();
     await go(`/?w=${SLUG}&i=${CODE}`);
@@ -1788,5 +1809,59 @@ describe("guests: invite links work without an account", () => {
     await page.locator("#guestBanner").waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, "nothing scrolls sideways");
     assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark");
+  });
+});
+
+describe("sharing links", () => {
+  browserTest("share a group or a plan: the share sheet where there is one, otherwise the link is copied", {}, async ({ page, context, go }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: state.base });
+    await go("/?w=pottery-sh4re");
+    await page.locator("#tentativePlanButton").click();
+    await page.fill("#planActivity", "Pottery night");
+    await page.locator("#tentativePlanForm button[type=submit]").click();
+    await page.locator("#tentativePlanSection").waitFor();
+
+    // No share sheet on desktop Chromium: copied, with a toast.
+    assert.equal(await page.evaluate(() => typeof navigator.share), "undefined");
+    await page.locator("#sharePlan").click();
+    await toastSays(page, /Plan link ready\. Link copied/);
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), `${state.base}/p/pottery-sh4re`);
+    await page.locator("#shareButton").click();
+    await toastSays(page, /Group link ready\. Link copied/);
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), `${state.base}/g/pottery-sh4re`);
+
+    // A phone's share sheet gets the link, a title and a line of text.
+    await page.evaluate(() => {
+      window.__shared = [];
+      navigator.share = async (data) => {
+        window.__shared.push(data);
+      };
+    });
+    await page.locator("#sharePlan").click();
+    await page.locator("#shareButton").click();
+    await page.waitForFunction(() => window.__shared.length === 2);
+    const [plan, group] = await page.evaluate(() => window.__shared);
+    assert.deepEqual(plan, { title: "Pottery night · vote on a time", text: "Vote on a time for Pottery night.", url: `${state.base}/p/pottery-sh4re` });
+    assert.equal(group.url, `${state.base}/g/pottery-sh4re`);
+    assert.match(group.title, /on Waddle$/);
+
+    // Closing the share sheet is not an error and copies nothing.
+    await page.evaluate(() => {
+      navigator.share = async () => {
+        throw new DOMException("cancelled", "AbortError");
+      };
+      return navigator.clipboard.writeText("untouched");
+    });
+    await page.locator("#sharePlan").click();
+    await page.waitForTimeout(300);
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), "untouched");
+  });
+
+  browserTest("a /g/ link opens the group at its usual address (demo mode: no code, generic preview)", {}, async ({ page, go }) => {
+    const html = await (await fetch(`${state.base}/g/pottery-sh4re`)).text();
+    assert.match(html, /<meta property="og:title" content="Waddle · find a time that works for everyone"/);
+    await go("/g/pottery-sh4re");
+    assert.equal(page.url(), `${state.base}/?w=pottery-sh4re`);
+    await page.waitForFunction(() => /Pottery/.test(document.querySelector("#workspaceName")?.textContent || ""));
   });
 });

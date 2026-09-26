@@ -12,6 +12,7 @@ Read this before changing anything that shows calendar events or sharing. These 
 | **Your calendar** (agenda under the grid) | Only you | Every event name. Tap an event to pick it for sharing, or lock it as private. |
 | **A friend's calendar** (Friends → Calendar) | That friend | Exactly what your "Who sees what" level for them allows. |
 | **Booking link** (public page) | Anyone with the link | Only open times, never event names or places. Private events still block bookings. |
+| **Link preview** (a `/g/` or `/p/` link pasted into a chat) | Anyone the link is sent to, and the chat app | The plan's title (or the group's name) and "Vote on a time", as page tags and a card image (`api/page.js`, `api/og.js`). Never member names, the plan's place or audience, event names or places. Without the live invite code: only the generic Waddle card. |
 | **Guest view** (group opened from an invite link, no account) | Someone who joined with just a name | Everyone's busy/free, the plan, ideas, votes and RSVPs. **Never** event names or places (even when the group allows event details), emails, account ids or the invite secret: the server strips them (`guestView` in `lib/guests.js`). A guest can change only their own busy times, votes and RSVP. |
 
 Busy/free is the baseline everywhere; names and places are always something the owner switches on, never the default.

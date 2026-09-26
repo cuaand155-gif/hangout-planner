@@ -47,7 +47,19 @@ const ROUTES = {
   "/api/groups": () => import("../api/groups.js"),
   "/api/book": () => import("../api/book.js"),
   "/api/google": () => import("../api/google.js"),
+  "/api/page": () => import("../api/page.js"),
+  "/api/og": () => import("../api/og.js"),
 };
+
+/** Mirrors vercel.json's rewrites for shareable links: /g/<group> and /p/<group>. */
+function rewrite(url) {
+  const pretty = /^\/([gp])\/([^/]+)$/.exec(url.pathname);
+  if (!pretty) return url;
+  const next = new URL(`/api/page${url.search}`, url);
+  next.searchParams.set("kind", pretty[1]);
+  next.searchParams.set("slug", decodeURIComponent(pretty[2]));
+  return next;
+}
 
 /** Mimics the response helpers the handlers rely on (status/json/setHeader). */
 function shimResponse(response) {
@@ -110,7 +122,7 @@ async function serveStatic(pathname, response) {
 }
 
 const server = createServer(async (request, response) => {
-  const url = new URL(request.url, `http://localhost:${PORT}`);
+  const url = rewrite(new URL(request.url, `http://localhost:${PORT}`));
   const route = ROUTES[url.pathname];
 
   if (fakeDb && url.pathname === "/__fake-db") {
