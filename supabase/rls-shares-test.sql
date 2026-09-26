@@ -93,7 +93,7 @@ exception when others then
   insert into rls_results(check_name, passed, detail) values ('you can save your own sharing choices', false, sqlerrm);
 end $$;
 
-with attempt as (update public.calendar_shares set events = '[]' where owner_id = '11111111-1111-1111-1111-111111111111' returning 1)
+with attempt as (update public.calendar_shares set events = '[{"start":"2026-09-24T13:00:00Z","end":"2026-09-24T14:00:00Z","title":"Soccer"}]' where owner_id = '11111111-1111-1111-1111-111111111111' returning 1)
 insert into rls_results(check_name, passed, detail) select 'an owner can update their share', count(*) = 1, 'updated: ' || count(*) from attempt;
 
 -- Bob: the viewer.

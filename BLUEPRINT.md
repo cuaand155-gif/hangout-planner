@@ -2,7 +2,7 @@
 
 The complete picture of what Waddle is supposed to do, where each piece lives, what proves it works, and what's left. Use it as the checklist before calling Waddle "done", and update it whenever a feature is added or changed. The product rules for what each view may show are in [CLAUDE.md](CLAUDE.md) and win over anything here.
 
-Last checked: 2026-09-25, master `f4199d1` plus the rest of Phase A (merged straight after). 229 unit/API tests and 50 browser tests, all passing (the browser suite ran twice in a row).
+Last checked: 2026-09-26 (database rules on the live project: 38/38). Tests: 2026-09-25, master `f4199d1` plus the rest of Phase A (merged straight after). 229 unit/API tests and 50 browser tests, all passing (the browser suite ran twice in a row).
 
 ## 1. What Waddle is
 
@@ -76,7 +76,7 @@ Status key: ✅ proven by an automated browser test · 🧪 proven by unit/API t
 | Share more for a while (today, weekend, 24 h, 7 days) | `grantEnd`, `publish_share` RPC | e2e "share more for a while…" (start, until, fallback, stop); `sharing` tests | ✅ |
 | Private events hidden from everyone (only a hash is stored) | `hideHash`, `withoutHidden` | `sharing` tests; e2e (preview, as Sam, and in the group) | ✅ |
 | Choices sync across devices | `sharing_settings`, `mergeSharing` | e2e "sharing choices follow you to another device" (second browser, fake database); `sharing` tests | ✅ (real accounts: 🙋) |
-| Database only lets friends read what was shared | RLS, `publish_share`, `shared_calendars` | `supabase/rls-shares-test.sql` (run against the live project) | 🧪 (a database policy: only SQL against the real project can prove it, not a browser) |
+| Database only lets friends read what was shared | RLS, `publish_share`, `shared_calendars` | `supabase/rls-test.sql` (14 checks) and `supabase/rls-shares-test.sql` (24 checks), run against the live project inside a transaction that rolls back | ✅ 38/38 on 2026-09-26 |
 | Free now status and strip | `lib/presence.js` | e2e "Free now strip" | ✅ |
 
 ### Plans
@@ -130,11 +130,11 @@ Done when: all rows are ✅ except the 🙋 ones, and both test commands pass. D
 
 ### Phase B: things only Alexi can do
 
-1. **Reconnect Google once** (Calendar links → remove Google → Connect) so the server keeps syncing.
+1. ~~**Reconnect Google once**~~ Done: the server holds a Google connection saved 2026-09-25 with the live keys.
 2. **Two-account test with a friend**: both sign in, add each other, check sharing levels, private events, Free now, a shared plan, and the group calendar. Open your booking link in a private window; Google events should show as unavailable.
 3. **Google's "unverified app" warning**: add friends as test users in Google Cloud (quick), or apply for verification (weeks).
 4. **Booking emails** (optional): buy a domain, create a free Resend account, then add `RESEND_API_KEY` and `BOOKING_EMAIL_FROM` in Vercel.
-5. **Tidy-up**: delete the Google key file from Google Drive (it's now stored in Vercel).
+5. ~~**Tidy-up**~~ Done 2026-09-26: the Google key file is in Drive's trash (the keys live in Vercel).
 
 ### Phase C: ideas for later (not started, need a yes)
 
