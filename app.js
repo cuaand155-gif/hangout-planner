@@ -74,9 +74,11 @@ import { FREE_LENGTHS, createPresenceStore, freeUntil } from "./lib/presence.js"
 import { DEMO_SLUG, checklistSteps, placeholderName, showChecklist } from "./lib/checklist.js";
 import { APPEARANCES, THEME_COLORS, normalizeAppearance, resolveTheme } from "./lib/appearance.js";
 import { initBookingOwner } from "./booking-owner.js";
-import { installMode, isStandalone, registerServiceWorker } from "./lib/pwa.js";
+import { installMode, isIos, isStandalone, registerServiceWorker } from "./lib/pwa.js";
 import { REPEATS, applyRsvp, nextOccurrence, repeatLabel, rsvpAnswers, rsvpSummary, toggleTimeVote } from "./lib/hangout.js";
 import { guestUpdateFrom, isInviteCode, newGuestToken } from "./lib/guests.js";
+import { membersWithoutVote, nextNudgeAt, notificationsFor, unseenCount } from "./lib/notifications.js";
+import { pushSupport, urlBase64ToUint8Array } from "./lib/push.js";
 
 // Shared links look like /g/<group>?i=<code> (the group) or /p/<group>?i=<code>
 // (its plan), so chat apps can show a preview (api/page.js). Once open, the
@@ -123,6 +125,8 @@ const STORAGE = {
   mineDetails: "gatherly-mine-details",
   // A guest's pass for one group: { invite, token } (see lib/guests.js).
   guest: (slug) => `gatherly-guest:${slug}`,
+  // Bell items (lib/notifications.js) already seen on this device, per group.
+  noticesSeen: (slug) => `gatherly-notices-seen:${slug}`,
 };
 
 const supabaseClient = AUTH_CONFIG.configured && window.supabase
@@ -1201,6 +1205,7 @@ function renderPlan() {
   const section = $("tentativePlanSection");
   if (!plan) {
     section.hidden = true;
+    renderNudge(null);
     return;
   }
   section.hidden = false;
@@ -1229,6 +1234,7 @@ function renderPlan() {
 
   renderRsvp(plan, occurrence);
   renderCalendarAdd(plan);
+  renderNudge(plan);
 }
 
 /** Suggested windows plus any time someone has voted for, most votes first. */
@@ -1361,7 +1367,14 @@ function withoutTitle(block) {
 function renderActivityBadge() {
   const latest = session.state.activity[0];
   const seen = window.localStorage.getItem(STORAGE.seen(session.slug));
-  $("activityDot").hidden = !latest || latest.at === seen;
+  const notices = unseenCount(myNotices(), readJson(STORAGE.noticesSeen(session.slug), []));
+  $("activityDot").hidden = (!latest || latest.at === seen) && !notices;
+}
+
+/** The bell's "For you" items for the person at this browser. */
+function myNotices() {
+  if (session.needsSignIn || !me()) return [];
+  return notificationsFor({ state: session.state, memberId, now: new Date() });
 }
 
 /** Only http(s) image URLs are allowed into a CSS url() value. */
@@ -2218,6 +2231,8 @@ $("clearMyWeek").addEventListener("click", async () => {
 function inviteCode() {
   if (session.guest) return guestPass()?.invite || null;
   const invite = session.state.invite;
+  // A locked group (or a 1-on-1) takes no guests, so its link carries no code.
+  if (session.state.settings.locked) return null;
   return invite && !invite.revoked ? invite.code : null;
 }
 
@@ -2811,26 +2826,33 @@ $("tentativePlanForm").addEventListener("submit", async (event) => {
   // Editing the plan keeps the picked time, votes and RSVPs.
   const previous = session.state.plan;
   if (previous) {
-    for (const key of ["chosen", "chosenEnd", "timeZone", "timeVotes", "rsvp"]) {
+    for (const key of ["chosen", "chosenEnd", "timeZone", "timeVotes", "rsvp", "createdBy", "createdAt", "chosenBy", "nudgedAt"]) {
       if (previous[key] !== undefined) plan[key] = previous[key];
     }
+  } else {
+    plan.createdBy = memberId;
+    plan.createdAt = new Date().toISOString();
   }
   // Opened from "Plan something": that window becomes the plan's time.
   if (ui.pendingWindow) {
     plan.chosen = ui.pendingWindow.start.toISOString();
     plan.chosenEnd = ui.pendingWindow.end.toISOString();
     plan.timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    plan.chosenBy = memberId;
     ui.pendingWindow = null;
   }
   if (plan.timing === "range" && plan.start && plan.end && plan.end < plan.start) {
     showToast("The end of the range comes before the start.");
     return;
   }
-  await mutate((draft) => {
+  const saved = await mutate((draft) => {
     draft.plan = plan;
   }, { note: `Tentative plan: ${plan.activity}` });
   dialogs.plan.close();
   showToast("Tentative plan saved — suggested windows are below.");
+  // Tell the group (people with notifications on get a push).
+  if (saved && !previous) announce("plan-proposed");
+  if (saved && plan.chosen && plan.chosen !== previous?.chosen) announce("time-chosen");
 });
 
 $("rsvpRow").addEventListener("click", async (event) => {
@@ -2875,15 +2897,17 @@ $("tentativeSuggestions").addEventListener("click", async (event) => {
   const windowEnd = button.dataset.windowEnd ? Number(button.dataset.windowEnd) : null;
   const planLength = settings().minWindowHours * 3600 * 1000;
   const chosenEnd = new Date(Math.min(chosen.getTime() + planLength, windowEnd || Infinity));
-  await mutate((draft) => {
+  const picked = await mutate((draft) => {
     if (!draft.plan) return;
     draft.plan.id = draft.plan.id || createId("plan");
     draft.plan.chosen = chosen.toISOString();
     draft.plan.chosenEnd = chosenEnd.toISOString();
+    draft.plan.chosenBy = memberId;
     draft.plan.timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     draft.plan.updatedAt = new Date().toISOString();
   }, { note: `Pencilled in for ${formatDayStamp(chosen)} at ${formatClock(chosen)}` });
   showToast(`Pencilled in for ${formatDayStamp(chosen)} at ${formatClock(chosen)}.`);
+  if (picked) announce("time-chosen");
 });
 
 /* People */
@@ -2910,6 +2934,13 @@ function renderInviteControls() {
   box.hidden = !invite || Boolean(session.guest) || !ui.user;
   if (box.hidden) return;
   const guests = session.state.members.filter((member) => member.guest).length;
+  if (session.state.settings.locked) {
+    $("inviteStatus").textContent = "Only signed-in members can join this group, so the link doesn't let guests in. Turn off \u201cOnly signed-in members can edit\u201d in Settings to allow guests.";
+    $("revokeInvite").hidden = true;
+    $("renewInvite").hidden = true;
+    return;
+  }
+  $("renewInvite").hidden = false;
   $("inviteStatus").textContent = invite.revoked
     ? "The link is off: nobody new can join with it, and guests can't open the group."
     : `Anyone with this link can join as a guest with just a name${guests ? ` (${guests} so far)` : ""}. Guests see busy/free and the plan, never event names or places.`;
@@ -3611,6 +3642,15 @@ $("resetLocal").addEventListener("click", () => {
 /* Activity */
 
 $("activityButton").addEventListener("click", () => {
+  const notices = myNotices();
+  const seenNotices = new Set(readJson(STORAGE.noticesSeen(session.slug), []));
+  $("noticeSection").hidden = !notices.length;
+  $("noticeList").innerHTML = notices
+    .map((item) => `<button type="button" class="notice-row ${escapeAttribute(item.kind)}${seenNotices.has(item.id) ? "" : " unseen"}" data-notice="${escapeAttribute(item.kind)}"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.body)}</small></button>`)
+    .join("");
+  writeJson(STORAGE.noticesSeen(session.slug), [...new Set([...seenNotices, ...notices.map((item) => item.id)])].slice(-100));
+  renderPushCard();
+  loadPushState().then(renderPushCard);
   const entries = session.state.activity;
   $("activityList").innerHTML = entries.length
     ? entries
@@ -3620,6 +3660,228 @@ $("activityButton").addEventListener("click", () => {
   if (entries[0]) window.localStorage.setItem(STORAGE.seen(session.slug), entries[0].at);
   renderActivityBadge();
   openDialog(dialogs.activity);
+});
+
+/* Announcing moments to the group, and nudging people who haven't voted */
+
+/**
+ * Tells the server something happened so it can send push notifications
+ * (api/notify.js). Signed-in members only; the server checks the claim
+ * against the saved group. Returns { ok, payload } or null when not sent.
+ */
+async function announce(kind) {
+  if (!ui.user || session.guest || !session.persisted) return null;
+  const token = await accessToken();
+  if (!token) return null;
+  try {
+    const response = await fetch("/api/notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ slug: session.slug, kind }),
+    });
+    return { ok: response.ok, payload: await response.json().catch(() => ({})) };
+  } catch {
+    return null;
+  }
+}
+
+/** "Nudge people who haven't voted": only for whoever proposed the plan, once per 12 hours. */
+function renderNudge(plan) {
+  const button = $("nudgeVoters");
+  const mine = Boolean(plan && !plan.chosen && plan.createdBy === memberId && ui.user && !session.guest && session.persisted);
+  button.hidden = !mine;
+  if (!mine) return;
+  const waiting = membersWithoutVote(session.state).length;
+  const next = nextNudgeAt(plan);
+  button.disabled = Boolean(next) || !waiting;
+  button.textContent = next
+    ? `Nudged · again ${formatDayStamp(next)}, ${formatClock(next)}`
+    : waiting
+      ? `Nudge people who haven't voted (${waiting})`
+      : "Everyone has voted";
+}
+
+$("nudgeVoters").addEventListener("click", async () => {
+  $("nudgeVoters").disabled = true;
+  const result = await announce("nudge");
+  if (!result) {
+    renderNudge(session.state.plan);
+    showToast("Sign in to nudge people.");
+    return;
+  }
+  if (result.payload.state) {
+    session.state = normalizeWorkspaceState(result.payload.state);
+    session.rev = result.payload.rev || session.rev;
+    writeJson(STORAGE.cache(session.slug), session.state);
+    render();
+  } else renderNudge(session.state.plan);
+  if (!result.ok) {
+    showToast(result.payload.error || "Couldn't nudge right now.");
+    return;
+  }
+  const count = result.payload.waiting || 0;
+  const pushed = result.payload.sent ? ` ${result.payload.sent} got a notification.` : "";
+  showToast(`Nudged ${count} ${count === 1 ? "person" : "people"}: they'll see it in the bell.${pushed}`);
+});
+
+/* Push notifications: opt-in from the bell, never asked on page load */
+
+const pushState = { configured: false, publicKey: null, subscribed: false, weekly: false, endpoint: null, busy: false, loaded: false };
+
+function pushSupportHere() {
+  return pushSupport({
+    hasServiceWorker: "serviceWorker" in navigator,
+    hasPushManager: "PushManager" in window,
+    hasNotification: "Notification" in window,
+    standalone: isStandalone(),
+    ios: isIos(navigator.userAgent, navigator.maxTouchPoints),
+  });
+}
+
+async function pushRegistration({ create = false } = {}) {
+  if (!("serviceWorker" in navigator)) return null;
+  let registration = await navigator.serviceWorker.getRegistration("/");
+  if (!registration && create) registration = await navigator.serviceWorker.register("/sw.js");
+  if (registration && create) await navigator.serviceWorker.ready;
+  return registration || null;
+}
+
+async function loadPushState() {
+  try {
+    const answer = await (await fetch("/api/push")).json();
+    pushState.configured = answer.configured === true;
+    pushState.publicKey = answer.publicKey || null;
+  } catch {
+    pushState.configured = false;
+  }
+  pushState.subscribed = false;
+  if (pushState.configured && ui.user && pushSupportHere().supported) {
+    try {
+      const subscription = await (await pushRegistration())?.pushManager.getSubscription();
+      if (subscription) {
+        pushState.endpoint = subscription.endpoint;
+        const token = await accessToken();
+        const answer = await (await fetch(`/api/push?endpoint=${encodeURIComponent(subscription.endpoint)}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })).json();
+        pushState.subscribed = answer.subscribed === true;
+        pushState.weekly = answer.weekly === true;
+      }
+    } catch {
+      /* No worker yet: it just reads as off. */
+    }
+  }
+  pushState.loaded = true;
+}
+
+function renderPushCard() {
+  const card = $("pushCard");
+  card.hidden = !pushState.loaded || !pushState.configured;
+  if (card.hidden) return;
+  const button = $("pushToggle");
+  const support = pushSupportHere();
+  const say = (title, detail, action) => {
+    $("pushTitle").textContent = title;
+    $("pushDetail").textContent = detail;
+    button.hidden = !action;
+    button.dataset.action = action?.key || "";
+    button.textContent = action?.label || "";
+    button.disabled = pushState.busy;
+  };
+  $("weeklyRow").hidden = true;
+  if (!ui.user) {
+    say("Get a nudge when plans change", "Sign in to get notifications on this device: new plans, the chosen time, and a reminder an hour before.", { key: "signin", label: "Sign in" });
+  } else if (!support.supported) {
+    say("Notifications", support.reason === "ios-home-screen"
+      ? "On iPhone, add Waddle to your Home Screen first (Share, then Add to Home Screen), then turn notifications on here."
+      : "This browser can't show notifications from Waddle.", null);
+  } else if (pushState.subscribed) {
+    say("Notifications are on", "New plans, the chosen time, nudges, and a reminder an hour before a plan starts.", { key: "off", label: "Turn off" });
+    $("weeklyRow").hidden = false;
+    $("weeklyToggle").checked = pushState.weekly;
+  } else if ("Notification" in window && Notification.permission === "denied") {
+    say("Notifications are blocked", "Your browser blocks notifications from Waddle. Allow them in its site settings, then come back here.", null);
+  } else {
+    say("Turn on notifications", "Get a nudge on this device when a plan is proposed, when a time is chosen, and an hour before it starts.", { key: "on", label: "Turn on notifications" });
+  }
+}
+
+async function savePushSubscription({ subscription = null, weekly = false } = {}) {
+  let json = subscription;
+  if (!json) json = (await (await pushRegistration())?.pushManager.getSubscription())?.toJSON();
+  if (!json) return false;
+  const token = await accessToken();
+  const response = await fetch("/api/push", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify({ subscription: json, weekly }),
+  });
+  const answer = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    showToast(answer.error || "Couldn't save that. Try again in a moment.");
+    return false;
+  }
+  pushState.subscribed = true;
+  pushState.weekly = answer.weekly === true;
+  return true;
+}
+
+async function enablePush() {
+  if (!pushState.publicKey) return;
+  const permission = await Notification.requestPermission();
+  if (permission !== "granted") {
+    showToast("Notifications weren't allowed, so nothing changed.");
+    return;
+  }
+  try {
+    const registration = await pushRegistration({ create: true });
+    const subscription = (await registration.pushManager.getSubscription())
+      || (await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(pushState.publicKey) }));
+    pushState.endpoint = subscription.endpoint;
+    if (await savePushSubscription({ subscription: subscription.toJSON(), weekly: pushState.weekly })) showToast("Notifications are on for this device.");
+  } catch {
+    showToast("This browser couldn't turn notifications on. Try again, or from the home screen app.");
+  }
+}
+
+async function disablePush() {
+  const subscription = await (await pushRegistration())?.pushManager.getSubscription().catch(() => null);
+  const endpoint = subscription?.endpoint || pushState.endpoint;
+  if (endpoint) {
+    const token = await accessToken();
+    await fetch("/api/push", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ endpoint }),
+    }).catch(() => {});
+  }
+  await subscription?.unsubscribe().catch(() => {});
+  pushState.subscribed = false;
+  showToast("Notifications are off for this device.");
+}
+
+$("pushToggle").addEventListener("click", async () => {
+  const action = $("pushToggle").dataset.action;
+  if (action === "signin") {
+    dialogs.activity.close();
+    if (session.guest) openSignInUpsell();
+    else openDialog(dialogs.account);
+    return;
+  }
+  pushState.busy = true;
+  renderPushCard();
+  try {
+    if (action === "off") await disablePush();
+    else await enablePush();
+  } finally {
+    pushState.busy = false;
+    renderPushCard();
+  }
+});
+
+$("weeklyToggle").addEventListener("change", async (event) => {
+  const wanted = event.target.checked;
+  if (await savePushSubscription({ weekly: wanted })) {
+    showToast(wanted ? "You'll get \u201cWho's free this weekend?\u201d on Thursdays." : "No more weekly nudge.");
+  } else event.target.checked = !wanted;
 });
 
 /* My calendar and who sees what */

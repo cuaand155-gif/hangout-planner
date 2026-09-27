@@ -139,6 +139,7 @@
             <div class="section-heading compact">
               <div><p class="eyebrow">JUST A THOUGHT</p><h2>Keep a maybe on the calendar</h2><p>Save the idea now and find the best time with your group later.</p></div>
               <div class="heading-actions">
+                <button class="text-button member-only" id="nudgeVoters" hidden>Nudge people who haven't voted</button>
                 <button class="text-button" id="sharePlan"><svg class="icon" aria-hidden="true"><use href="#i-share"/></svg> Share plan</button>
                 <button class="text-button member-only" id="editTentativePlan">Edit plan <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button>
                 <button class="text-button subtle member-only" id="removeTentativePlan">Remove</button>
@@ -677,6 +678,16 @@
 
     <dialog id="activityDialog">
       <div class="dialog-header"><div><p class="eyebrow">RECENT ACTIVITY</p><h2>What changed.</h2></div><button class="close-dialog" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+      <div class="push-card" id="pushCard" hidden>
+        <div><strong id="pushTitle">Turn on notifications</strong><small id="pushDetail"></small>
+          <label class="detail-toggle weekly-row" id="weeklyRow" hidden><input type="checkbox" id="weeklyToggle" /> Thursdays: “Who's free this weekend?”</label></div>
+        <button class="outline-button" type="button" id="pushToggle">Turn on notifications</button>
+      </div>
+      <div id="noticeSection" hidden>
+        <p class="field-label">FOR YOU</p>
+        <div class="notice-list" id="noticeList"></div>
+        <p class="field-label">EVERYTHING</p>
+      </div>
       <div class="activity-list" id="activityList"></div>
     </dialog>
 

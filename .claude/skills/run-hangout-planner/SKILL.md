@@ -96,7 +96,7 @@ Useful selectors:
 
 ```bash
 npm test          # node --test "test/*.test.mjs"; 263 passing, about 5 s
-npm run test:e2e  # node --test "test/e2e/*.e2e.mjs"; 60 browser tests, about 3 min
+npm run test:e2e  # node --test "test/e2e/*.e2e.mjs"; 66 browser tests, about 3 min
 ```
 
 `npm test` covers the API handlers with a faked `fetch` (PostgREST, Supabase auth, Google, Resend: nothing real is called and no email is ever sent), the pure logic in `lib/` (booking, sharing, hangout, ics, …), and the offline-shell list in `sw.js`. `test/book-services.test.mjs` covers the booking page's Google freeBusy check and the booking emails. Database policies are checked separately by `supabase/rls-shares-test.sql`, run in a rolled-back transaction against a real project.

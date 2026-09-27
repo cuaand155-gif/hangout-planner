@@ -48,7 +48,9 @@ import {
   newInviteCode,
   removeGuest,
 } from "../lib/guests.js";
-import { bearer, config, restHeaders, send, userFromToken } from "./_supabase.js";
+import { bearer, config, send, userFromToken } from "./_supabase.js";
+import { insertRow, loadRow, saveIfUnchanged, updateRow } from "./_store.js";
+import { countMetric } from "./_metrics.js";
 
 // Room for a full-size state (LIMITS.stateBytes) plus the request wrapper.
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -95,72 +97,6 @@ function header(request, name) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-async function loadRow(url, key, slug) {
-  const endpoint = `${url}/rest/v1/workspaces?slug=eq.${encodeURIComponent(slug)}&select=slug,state,updated_at`;
-  const result = await fetch(endpoint, { headers: restHeaders(key) });
-  if (!result.ok) return { error: await describe(result) };
-  const rows = await result.json();
-  return { row: rows[0] || null };
-}
-
-async function describe(result) {
-  try {
-    const body = await result.text();
-    return `${result.status} ${body.slice(0, 200)}`;
-  } catch {
-    return String(result.status);
-  }
-}
-
-async function insertRow(url, key, slug, state) {
-  const result = await fetch(`${url}/rest/v1/workspaces`, {
-    method: "POST",
-    headers: restHeaders(key, { Prefer: "return=representation,resolution=merge-duplicates" }),
-    body: JSON.stringify({ slug, state, updated_at: new Date().toISOString() }),
-  });
-  if (!result.ok) return { error: await describe(result) };
-  const rows = await result.json();
-  return { row: rows[0] || null };
-}
-
-/** Saves `state` only if the row still carries `rev`. Returns the saved row, or null when someone else saved first. */
-async function saveIfUnchanged(url, key, slug, rev, state) {
-  const updatedAt = new Date().toISOString();
-  const filter = rev
-    ? `slug=eq.${encodeURIComponent(slug)}&updated_at=eq.${encodeURIComponent(rev)}`
-    : `slug=eq.${encodeURIComponent(slug)}`;
-  const result = await fetch(`${url}/rest/v1/workspaces?${filter}`, {
-    method: "PATCH",
-    headers: restHeaders(key, { Prefer: "return=representation" }),
-    body: JSON.stringify({ state: { ...state, updatedAt }, updated_at: updatedAt }),
-  });
-  if (!result.ok) return { error: await describe(result) };
-  const rows = await result.json();
-  return { row: rows[0] || null };
-}
-
-/**
- * Read, change, compare-and-swap, retrying when somebody saved in between.
- * `change(stored)` returns { state } to save (null state: nothing to save) and
- * `reply(state, rev)` for the answer, or { status, body } to stop.
- */
-async function updateRow(url, key, slug, change) {
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    const { row, error } = await loadRow(url, key, slug);
-    if (error) return { status: 502, body: { error: "Unable to load workspace", detail: error } };
-    if (!row) return { status: 404, body: { error: "This group doesn't exist." } };
-    const stored = normalizeWorkspaceState(row.state);
-    const outcome = await change(stored);
-    if (outcome.status) return outcome;
-    if (!outcome.state) return { status: 200, body: outcome.reply(stored, row.updated_at) };
-    if (stateTooLarge(outcome.state)) return { status: 413, body: { error: "Workspace is too large" } };
-    const saved = await saveIfUnchanged(url, key, slug, row.updated_at, outcome.state);
-    if (saved.error) return { status: 502, body: { error: "Unable to save workspace", detail: saved.error } };
-    if (saved.row) return { status: 200, body: outcome.reply(normalizeWorkspaceState(saved.row.state), saved.row.updated_at) };
-  }
-  return { status: 409, body: { error: "Your group is busy saving right now. Try again in a moment." } };
-}
-
 /** Owners manage the link and guests. A group nobody owns yet lets any signed-in member. */
 function canManage(state, userId) {
   if (!userId) return false;
@@ -184,6 +120,7 @@ async function guestRead(response, { url, key, slug, invite, token }) {
   }
   const memberId = await guestForToken(stored, token);
   if (!memberId) {
+    await countMetric("invites_opened");
     return send(response, 200, { slug, join: { name: stored.name, people: stored.members.length, full: stored.members.length >= LIMITS.members }, persisted: true });
   }
   return send(response, 200, { slug, guest: { memberId }, state: guestView(stored), rev: row.updated_at, persisted: true });
@@ -194,6 +131,7 @@ async function guestAction(response, body, { url, key, slug }) {
   if (!isGuestToken(token)) return send(response, 400, { error: "Missing guest token." });
   const hash = await hashToken(token);
   let joinedId = null;
+  let guestVotes = 0;
 
   const outcome = await updateRow(url, key, slug, async (stored) => {
     if (!inviteIsLive(stored, invite)) return { status: 403, body: { error: "This invite link doesn't work any more.", inviteRevoked: true, signIn: true } };
@@ -220,9 +158,11 @@ async function guestAction(response, body, { url, key, slug }) {
     if (!counter) return { status: 429, body: { error: "That's a lot of changes at once. Wait a minute, then try again." } };
     const applied = applyGuestUpdate(stored, existing, body, new Date());
     if (!applied) return { status: 403, body: { error: "You're not in this group any more.", guestUnknown: true } };
+    guestVotes = applied.votes;
     const next = normalizeWorkspaceState({ ...applied.state, guests: { ...applied.state.guests, [existing]: { ...stored.guests[existing], ...counter } } });
     return { state: next, reply };
   });
+  if (outcome.status === 200 && guestVotes) await countMetric("guest_votes", guestVotes);
   return send(response, outcome.status === 200 && action === "guest-join" && joinedId ? 201 : outcome.status, outcome.body);
 }
 
@@ -400,6 +340,14 @@ async function handle(request, response) {
     if (authenticatedUser !== stored.ownerId) incoming.ownerId = stored.ownerId;
   }
 
+  // Who proposed a plan and who picked its time come from the caller's own
+  // account, not from what the browser says, and the nudge time is the
+  // server's (see api/notify.js).
+  if (incoming.plan) {
+    if (authenticatedUser === undefined) authenticatedUser = await userFromToken(url, key, bearer(request));
+    Object.assign(incoming.plan, planAuthorship(stored, incoming, authenticatedUser));
+  }
+
   // The invite link and the guests' token hashes are the server's: a member's
   // save can never change or drop them (normalizing prunes removed guests).
   const next = normalizeWorkspaceState({ ...incoming, invite: stored.invite || null, guests: stored.guests || null });
@@ -417,7 +365,29 @@ async function handle(request, response) {
       persisted: true,
     });
   }
+  if (next.plan && next.plan.id !== stored.plan?.id) await countMetric("plans_created");
+  if (next.plan?.chosen && next.plan.chosen !== stored.plan?.chosen) await countMetric("plans_confirmed");
   return send(response, 200, { slug, state: memberView(normalizeWorkspaceState(saved.row.state)), rev: saved.row.updated_at, persisted: true });
+}
+
+/** createdBy/createdAt/chosenBy/nudgedAt for a plan being saved by `userId`. */
+export function planAuthorship(stored, incoming, userId) {
+  const plan = incoming.plan;
+  const before = stored.plan && stored.plan.id && stored.plan.id === plan.id ? stored.plan : null;
+  const caller = userId ? stored.members.find((member) => member.userId === userId) || incoming.members.find((member) => member.userId === userId) : null;
+  const fields = {};
+  if (before) {
+    fields.createdBy = before.createdBy;
+    fields.createdAt = before.createdAt;
+    fields.nudgedAt = before.nudgedAt;
+  } else {
+    fields.createdBy = caller?.id || plan.createdBy;
+    fields.createdAt = new Date().toISOString();
+    fields.nudgedAt = undefined;
+  }
+  if (plan.chosen && plan.chosen !== before?.chosen) fields.chosenBy = caller?.id || plan.chosenBy;
+  else fields.chosenBy = plan.chosen ? before?.chosenBy : undefined;
+  return fields;
 }
 
 /**

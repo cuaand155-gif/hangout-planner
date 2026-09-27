@@ -6,7 +6,7 @@
 // through to the network.
 
 // Bump the version whenever SHELL changes; activate deletes the old cache.
-const CACHE = "waddle-v4";
+const CACHE = "waddle-v5";
 
 // The app shell: the page, every module app.js imports (directly or not), styles and icons.
 const SHELL = [
@@ -25,10 +25,12 @@ const SHELL = [
   "/lib/groups.js",
   "/lib/guests.js",
   "/lib/membership.js",
+  "/lib/notifications.js",
   "/lib/palettes.js",
   "/lib/phone.js",
   "/lib/planner.js",
   "/lib/presence.js",
+  "/lib/push.js",
   "/lib/pwa.js",
   "/lib/sharing.js",
   "/lib/sync.js",
@@ -90,3 +92,34 @@ async function networkFirst(event, key) {
     throw error;
   }
 }
+
+// Push notifications (sent by api/_push.js to people who turned them on).
+// The message says what happened and which page to open; nothing else.
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { body: event.data ? event.data.text() : "" };
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title || "Waddle", {
+      body: data.body || "",
+      icon: "/icons/icon-192.png",
+      badge: "/icons/icon-192.png",
+      tag: data.tag || undefined,
+      data: { url: typeof data.url === "string" && data.url.startsWith("/") ? data.url : "/" },
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = new URL(event.notification.data?.url || "/", self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
+      const open = windows.find((client) => client.url === url);
+      return open ? open.focus() : self.clients.openWindow(url);
+    })
+  );
+});
