@@ -41,8 +41,10 @@ week, creating, renaming and switching groups, the getting-started checklist,
 inviting and removing people, repeating plans, adding a plan to a calendar
 (the .ics file and the Google link; Google itself is never opened), ideas with
 photos, your profile, adding an ICS link, best-time cards, setting up a
-booking link, the sign-in gate, the offline shell and install, a few layout
-checks, and phone and dark-theme smoke tests. Any page error fails the test.
+booking link, the sign-in gate, the offline shell and install, the Friends
+page with a request by phone number, signing in with a texted code, a 1-on-1
+with a friend, organization groups, always-busy hours, a few layout checks,
+and phone and dark-theme smoke tests. Any page error fails the test.
 
 It adds no dependency: it uses Playwright from `PLAYWRIGHT_PATH`
 (default `/opt/node22/lib/node_modules/playwright/index.mjs`) or an installed
@@ -167,7 +169,7 @@ browser, and only what the choices below allow ever leaves it.
 - **Friends** get a default level, and any friend can be set differently.
   Each friend receives their own filtered copy (`calendar_shares`, one row per
   friend), which row level security lets only them read. Open a friend's
-  calendar from Manage people → Friends → Calendar.
+  calendar from Friends → Calendar.
 - **Groups** get one level for all of them — busy, picked or everything — and
   a group must also allow event details under Privacy before any name reaches
   it, because everyone holding a group's link can read it. Inside a group you
@@ -183,13 +185,41 @@ browser, and only what the choices below allow ever leaves it.
 - Signed in, these choices are saved to your account (`sharing_settings`) and
   follow you to every device; whichever device changed them last wins.
 
-### Friends and free now
+### Friends, 1-on-1s and free now
 
-Friends are people who accepted a friend request. Manage people → Friends
-lists them, opens their calendar (as much as they chose to show you), and
-adds them to the current group in one tap. **I'm free** tells your friends
+Friends don't need a group. **Friends** in the sidebar sends requests by email
+or phone number (someone without an account sees it when they first sign in
+with that address or number), lists your friends, opens their calendar (as
+much as they chose to show you) with the hours you're **both free**, and adds
+them to the current group in one tap. **1-on-1** opens a two-person space with
+that friend for plans, time votes and RSVPs. Both of you land in the same
+space: its link is made from your friendship's id, which only the two of you
+can read, and it is locked to the two of you. **I'm free** tells your friends
 you're free for an hour, 2 hours or the rest of today; friends who are free
 show in the **Free now** strip on the home screen.
+
+### Organization groups
+
+When you start a group you pick **Friends** or **Organization or business**
+(a club, team or workplace). An organization group only ever shows free and
+busy: event details can't be switched on, and names and places are stripped
+every time the group is saved, by the server too. Settings → Group type
+changes it later.
+
+### Always busy
+
+**Always busy** in the sidebar blocks the same hours every week in one go:
+quick adds for work (Mon–Fri 9–5), school and sleep (11 pm–7 am, overnight),
+or your own days and times. Groups, friends and your booking link see those
+hours as busy, never the label. The rules are saved with your sharing choices,
+so they follow you to your other devices and every group you open.
+
+### Signing in
+
+Google, or your phone number: Waddle texts a one-time code (Supabase Auth
+`signInWithOtp`). Phone sign-in needs the Phone provider turned on in Supabase
+with an SMS provider such as Twilio; until then the app says it isn't
+switched on yet.
 
 ### Booking links
 

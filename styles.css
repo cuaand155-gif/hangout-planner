@@ -576,6 +576,44 @@ section.free-now::-webkit-scrollbar{display:none}
 .gc-event small{display:block;font-size:10px;color:var(--muted)}
 .gc-event.is-private{color:var(--muted)}.gc-event .icon{width:10px;height:10px;margin-right:3px;vertical-align:-1px}
 @media(max-width:620px){.groupcal-grid{gap:5px}.gc-person{position:static}}
+/* ---------- Friends page, 1-on-1s, phone sign-in, group types, always busy ---------- */
+.nav-button .count-badge{margin-left:auto}
+.dialog-header-actions{display:flex;align-items:center;gap:10px}
+.free-together{margin:4px 0 14px}
+.free-together .field-label{margin-top:10px}
+.together-list{display:flex;gap:7px;flex-wrap:wrap}
+.together-chip{display:grid;gap:2px;text-align:left;border:1px solid color-mix(in srgb,var(--purple) 30%,var(--line));background:color-mix(in srgb,var(--purple) 6%,var(--surface));border-radius:12px;padding:8px 12px;color:var(--ink);transition:border-color .2s var(--ease),transform .2s var(--ease)}
+.together-chip:hover{border-color:var(--purple);transform:translateY(-1px)}
+.together-chip strong{font-size:11px}
+.together-chip span{font-size:10px;color:var(--muted)}
+.auth-divider{display:flex;align-items:center;gap:10px;margin:18px 0 0;color:var(--faint,#a69d95);font-size:10px;letter-spacing:1px;text-transform:uppercase;font-weight:700}
+.auth-divider::before,.auth-divider::after{content:"";flex:1;height:1px;background:var(--line)}
+.phone-signin .field-label{margin-top:12px}
+.signin-card .outline-button.full{margin-top:10px}
+.kind-options{display:grid;gap:7px;margin-top:12px}
+.kind-option{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:12px;padding:11px 12px;cursor:pointer}
+.kind-option input{margin:2px 0 0;accent-color:var(--purple)}
+.kind-option:has(input:checked){border-color:color-mix(in srgb,var(--purple) 40%,var(--paper));background:color-mix(in srgb,var(--purple) 5%,var(--surface))}
+.kind-option strong,.kind-option small{display:block}
+.kind-option strong{font-size:12px}
+.kind-option small{color:#a39a92;font-size:10px;line-height:1.45;margin-top:3px}
+.privacy-option.disabled{opacity:.5;cursor:not-allowed}
+.preset-row{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+.preset-chip{display:grid;gap:3px;text-align:left;border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:10px 11px;color:var(--ink);transition:border-color .2s var(--ease)}
+.preset-chip:hover{border-color:var(--purple)}
+.preset-chip strong{font-size:12px}
+.preset-chip small{font-size:10px;color:var(--muted);line-height:1.35}
+.preset-chip.added{opacity:.55;cursor:default;border-style:dashed}
+.preset-chip.added strong::after{content:" ✓";color:var(--purple)}
+#blockedForm .weekday-picker{margin-bottom:4px}
+.blocked-list{display:grid;gap:7px}
+.blocked-row{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.blocked-row div{min-width:0}
+.blocked-row strong,.blocked-row small{display:block}
+.blocked-row strong{font-size:12px}
+.blocked-row small{font-size:10px;color:var(--muted);margin-top:2px}
+.blocked-icon{width:26px;height:26px;border-radius:8px;background:var(--lavender);color:var(--purple);display:grid;place-items:center;flex:none}
+@media(max-width:620px){.preset-row{grid-template-columns:1fr}.dialog-header-actions .primary-button{padding:8px 10px}}
 /* ---------- Guests: join with a name from an invite link ---------- */
 .guest-mode .member-only{display:none!important}
 .guest-join{display:grid;gap:8px;margin:20px 0 4px;text-align:left}

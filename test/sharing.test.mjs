@@ -35,7 +35,7 @@ const EVENTS = [
 ];
 
 test("the default is the private choice", () => {
-  assert.deepEqual(defaultSharing(), { friends: "busy", perFriend: {}, groups: "busy", picked: [], hidden: [], grants: [], salt: "", updatedAt: null });
+  assert.deepEqual(defaultSharing(), { friends: "busy", perFriend: {}, groups: "busy", picked: [], hidden: [], grants: [], blocked: [], salt: "", updatedAt: null });
   assert.deepEqual(normalizeSharing(null), defaultSharing());
   assert.deepEqual(normalizeSharing("garbage"), defaultSharing());
 });

@@ -101,6 +101,55 @@ set local request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","e
 with attempt as (delete from public.friend_requests where id = 'aaaaaaaa-0000-0000-0000-000000000001' returning 1)
 insert into rls_results(check_name, passed, detail) select 'the sender can withdraw', count(*) = 1, 'deleted: ' || count(*) from attempt;
 
+-- Requests by phone number: Dana signs in with a phone and has no email.
+-- Supabase puts the number in the token without its "+".
+reset role;
+insert into auth.users (id, instance_id, aud, role, phone, created_at, updated_at)
+values ('44444444-4444-4444-4444-444444444444', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', '14165550123', now(), now());
+insert into rls_results(check_name, passed, detail)
+select 'a phone-only account still gets a profile with a name', count(*) = 1, coalesce(max(display_name), 'no profile')
+from public.profiles where id = '44444444-4444-4444-4444-444444444444' and display_name <> '';
+set local role authenticated;
+
+set local request.jwt.claims = '{"sub":"11111111-1111-1111-1111-111111111111","email":"alice@test.invalid","role":"authenticated"}';
+do $$ begin
+  insert into public.friend_requests (id, requester_id, recipient_phone)
+  values ('aaaaaaaa-0000-0000-0000-000000000002', '11111111-1111-1111-1111-111111111111', '+14165550123');
+  insert into rls_results(check_name, passed, detail) values ('a request can be sent to a phone number', true, 'inserted');
+exception when others then
+  insert into rls_results(check_name, passed, detail) values ('a request can be sent to a phone number', false, sqlerrm);
+end $$;
+
+do $$ begin
+  insert into public.friend_requests (requester_id, recipient_phone) values ('11111111-1111-1111-1111-111111111111', '+14165550123');
+  insert into rls_results(check_name, passed, detail) values ('cannot stack a duplicate live request to a number', false, 'the insert was allowed');
+exception when others then
+  insert into rls_results(check_name, passed, detail) values ('cannot stack a duplicate live request to a number', true, sqlerrm);
+end $$;
+
+do $$ begin
+  insert into public.friend_requests (requester_id) values ('11111111-1111-1111-1111-111111111111');
+  insert into rls_results(check_name, passed, detail) values ('a request needs an email or a phone number', false, 'the insert was allowed');
+exception when others then
+  insert into rls_results(check_name, passed, detail) values ('a request needs an email or a phone number', true, sqlerrm);
+end $$;
+
+set local request.jwt.claims = '{"sub":"44444444-4444-4444-4444-444444444444","phone":"14165550123","role":"authenticated"}';
+insert into rls_results(check_name, passed, detail)
+select 'the owner of the number reads the request', count(*) = 1, 'rows: ' || count(*) from public.friend_requests;
+do $$ begin
+  insert into public.friend_requests (requester_id, recipient_phone) values ('44444444-4444-4444-4444-444444444444', '+14165550123');
+  insert into rls_results(check_name, passed, detail) values ('cannot send a request to your own number', false, 'the insert was allowed');
+exception when others then
+  insert into rls_results(check_name, passed, detail) values ('cannot send a request to your own number', true, sqlerrm);
+end $$;
+with attempt as (update public.friend_requests set status = 'accepted', recipient_id = '44444444-4444-4444-4444-444444444444', responded_at = now() where id = 'aaaaaaaa-0000-0000-0000-000000000002' returning 1)
+insert into rls_results(check_name, passed, detail) select 'the owner of the number can accept', count(*) = 1, 'updated: ' || count(*) from attempt;
+
+set local request.jwt.claims = '{"sub":"33333333-3333-3333-3333-333333333333","email":"carol@test.invalid","phone":"16475550000","role":"authenticated"}';
+insert into rls_results(check_name, passed, detail)
+select 'another number cannot read it', count(*) = 0, 'rows: ' || count(*) from public.friend_requests;
+
 reset role;
 select check_name, passed, detail from rls_results order by seq;
 

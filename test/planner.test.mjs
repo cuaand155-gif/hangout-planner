@@ -278,3 +278,55 @@ test("the demo workspace is valid and has live overlaps this week", () => {
   assert.ok(windows.length > 0, "recurring demo patterns keep the sample workspace alive in any week");
   assert.equal(voteCount(state.ideas[0]), 3);
 });
+
+test("an organization group only ever keeps busy and free", async () => {
+  const { normalizeWorkspaceState } = await import("../lib/planner.js");
+  const state = normalizeWorkspaceState({
+    kind: "organization",
+    privacy: "details",
+    members: [{ id: "a", name: "A", busy: [{ start: "2026-10-05T13:00:00Z", end: "2026-10-05T14:00:00Z", title: "Therapy", location: "Clinic", source: "google" }], weekly: [{ weekday: 1, start: "09:00", end: "10:00", title: "Gym" }] }],
+  });
+  assert.equal(state.kind, "organization");
+  assert.equal(state.privacy, "busy");
+  assert.deepEqual(state.members[0].busy, [{ start: "2026-10-05T13:00:00.000Z", end: "2026-10-05T14:00:00.000Z", source: "google" }]);
+  assert.deepEqual(state.members[0].weekly, [{ weekday: 1, start: "09:00", end: "10:00" }]);
+  assert.equal(normalizeWorkspaceState({ kind: "nonsense" }).kind, undefined, "an ordinary group stores no kind");
+  assert.equal(normalizeWorkspaceState({ kind: "pair", privacy: "details" }).privacy, "details");
+});
+
+test("always-busy hours block a member's time every week, on top of what they shared", async () => {
+  const { busyBlocksFor, materializeWeek, normalizeWorkspaceState, buildWeek, classifySlot } = await import("../lib/planner.js");
+  const monday = new Date(2026, 9, 5);
+  const [member] = normalizeWorkspaceState({
+    members: [{ id: "a", name: "A", blocked: [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00", label: "secret label" }], weekly: [{ weekday: 1, start: "18:00", end: "19:00" }] }],
+  }).members;
+  assert.deepEqual(member.blocked, [{ days: [1, 2, 3, 4, 5], start: "09:00", end: "17:00" }], "no label in the group");
+  const blocks = busyBlocksFor(member, monday);
+  assert.deepEqual(blocks.map((block) => [new Date(block.start).getHours(), block.source]), [[9, "blocked"], [18, "weekly"]]);
+  assert.equal(classifySlot([member], monday, 10).state, "busy");
+  assert.equal(classifySlot([member], monday, 17).state, "overlap");
+  // Someone who only set always-busy hours is free the rest of the time.
+  const [onlyRules] = normalizeWorkspaceState({ members: [{ id: "b", name: "B", blocked: [{ days: [1], start: "09:00", end: "10:00" }] }] }).members;
+  assert.equal(classifySlot([onlyRules], monday, 12).state, "overlap");
+  assert.equal(busyBlocksFor(onlyRules, new Date(2026, 9, 6)), null, "other days stay unknown");
+  // Editing one week never bakes the rules into dated busy time.
+  const week = buildWeek(monday, { today: monday });
+  assert.ok(materializeWeek(member, week).every((block) => new Date(block.start).getHours() !== 9));
+  assert.equal(busyBlocksFor({ ...member, sharesSchedule: false }, monday), null);
+});
+
+test("freeTogether finds the hours nobody is busy, soonest first", async () => {
+  const { freeTogether, buildWeek } = await import("../lib/planner.js");
+  const monday = new Date(2026, 9, 5);
+  const week = buildWeek(monday, { today: monday, days: 2 });
+  const at = (day, hour) => new Date(2026, 9, day, hour).toISOString();
+  const busy = [
+    { start: at(5, 8), end: at(5, 12) }, // mine
+    { start: at(5, 14), end: at(5, 15) }, // theirs
+    { start: at(6, 8), end: at(6, 22) },
+  ];
+  const windows = freeTogether(week, busy, { dayStart: 8, dayEnd: 22, now: new Date(2026, 9, 5, 7) });
+  assert.deepEqual(windows.map((w) => [w.start.getHours(), w.end.getHours(), w.hours]), [[12, 14, 2], [15, 22, 7]]);
+  const later = freeTogether(week, busy, { dayStart: 8, dayEnd: 22, minHours: 3, now: new Date(2026, 9, 5, 16, 30) });
+  assert.deepEqual(later.map((w) => [w.start.getHours(), w.end.getHours()]), [[17, 22]], "hours already started are skipped");
+});

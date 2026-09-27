@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { GROUP_LIMIT, forgetGroup, mergeGroups, newGroupSlug, rememberGroup, renameGroup } from "../lib/groups.js";
+import { GROUP_LIMIT, forgetGroup, mergeGroups, newGroupSlug, rememberGroup, renameGroup, pairSlug, isPairSlug } from "../lib/groups.js";
 import { dueForSync, sameBusy } from "../lib/sync.js";
 
 test("a new group slug keeps the name readable and adds an unguessable suffix", () => {
@@ -87,4 +87,13 @@ test("sameBusy ignores order but notices any real change", () => {
   assert.equal(sameBusy([a], [{ ...a, title: "Dentist" }]), false, "a title appearing is a change");
   assert.equal(sameBusy([{ ...a, title: "Dentist" }], [{ ...a, title: "Dentist", location: "Bloor St" }]), false, "so is a place");
   assert.equal(sameBusy([], []), true);
+});
+
+test("pairSlug: both friends get the same 1-on-1 link, and each friendship its own", async () => {
+  const one = await pairSlug("5f0c7c1e-0000-4000-8000-000000000001");
+  assert.equal(one, await pairSlug("5f0c7c1e-0000-4000-8000-000000000001"));
+  assert.notEqual(one, await pairSlug("5f0c7c1e-0000-4000-8000-000000000002"));
+  assert.match(one, /^1on1-[a-f0-9]{16}$/);
+  assert.equal(isPairSlug(one), true);
+  assert.equal(isPairSlug("book-club-7fq2x"), false);
 });
