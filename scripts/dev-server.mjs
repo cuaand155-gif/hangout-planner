@@ -21,6 +21,15 @@ if (FAKE_DB) {
   const { createFakeSupabase, installFakeSupabase } = await import("./fake-supabase.mjs");
   fakeDb = createFakeSupabase();
   installFakeSupabase(fakeDb);
+  // Push and the scheduler work too: throwaway keys, and a known cron secret.
+  if (!process.env.VAPID_PUBLIC_KEY) {
+    const { default: webpush } = await import("web-push");
+    const keys = webpush.generateVAPIDKeys();
+    process.env.VAPID_PUBLIC_KEY = keys.publicKey;
+    process.env.VAPID_PRIVATE_KEY = keys.privateKey;
+    process.env.VAPID_SUBJECT = "mailto:test@example.com";
+  }
+  process.env.CRON_SECRET ||= "fake-cron-secret";
 }
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -49,6 +58,9 @@ const ROUTES = {
   "/api/google": () => import("../api/google.js"),
   "/api/page": () => import("../api/page.js"),
   "/api/og": () => import("../api/og.js"),
+  "/api/push": () => import("../api/push.js"),
+  "/api/notify": () => import("../api/notify.js"),
+  "/api/cron": () => import("../api/cron.js"),
 };
 
 /** Mirrors vercel.json's rewrites for shareable links: /g/<group> and /p/<group>. */

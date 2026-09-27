@@ -51,3 +51,33 @@ export async function userFromToken(url, key, token) {
     return null;
   }
 }
+
+/** Resolves a Supabase access token to { id, email }, or null when invalid. */
+export async function accountFromToken(url, key, token) {
+  if (!token) return null;
+  try {
+    const result = await fetch(`${url}/auth/v1/user`, { headers: { apikey: key, Authorization: `Bearer ${token}` } });
+    if (!result.ok) return null;
+    const user = await result.json();
+    return user?.id ? { id: user.id, email: String(user.email || "").toLowerCase() } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Reads a JSON body (Vercel parses it already; the dev server may not), capped. */
+export async function jsonBody(request, limit = 16 * 1024) {
+  if (request.body !== undefined && request.body !== null && request.body !== "") {
+    const text = typeof request.body === "string" ? request.body : JSON.stringify(request.body);
+    if (text.length > limit) throw new Error("too-large");
+    return typeof request.body === "string" ? JSON.parse(request.body) : request.body;
+  }
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > limit) throw new Error("too-large");
+    chunks.push(chunk);
+  }
+  return size ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+}

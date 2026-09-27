@@ -14,6 +14,7 @@ import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { PLAYWRIGHT_PATH, loadPlaywright, openSession } from "../../.claude/skills/run-hangout-planner/session.mjs";
 import { parseIcs } from "../../lib/ics.js";
+import { createECDH, randomBytes } from "node:crypto";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const state = { playwright: null, browser: null, server: null, base: "", dbServer: null, dbBase: "", skip: "" };
@@ -2084,5 +2085,151 @@ describe("sharing links", () => {
     await go("/g/pottery-sh4re");
     assert.equal(page.url(), `${state.base}/?w=pottery-sh4re`);
     await page.waitForFunction(() => /Pottery/.test(document.querySelector("#workspaceName")?.textContent || ""));
+  });
+});
+
+describe("notifications", () => {
+  const SLUG = "book-club-n0t1f";
+  const CODE = "NotifyLinkCode0123456789";
+  const fakeDb = {
+    async seed(tables) {
+      const response = await fetch(`${state.dbBase}/__fake-db`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tables }) });
+      assert.ok(response.ok);
+    },
+    async tables() {
+      return (await fetch(`${state.dbBase}/__fake-db`)).json();
+    },
+  };
+
+  /** Alexi proposed Dinner; Sam is in the group with an account. */
+  function planGroup(plan = {}) {
+    return {
+      name: "Book club",
+      ownerId: ALEXI,
+      invite: { code: CODE, revoked: false, createdAt: new Date().toISOString() },
+      members: [
+        { id: "m_alexi", name: "Alexi", userId: ALEXI },
+        { id: "m_sam", name: "Sam Rivera", userId: SAM },
+      ],
+      plan: { id: "plan_dinner", activity: "Dinner", location: "Luma", audience: "Book club", timing: "month", createdBy: "m_alexi", createdAt: new Date().toISOString(), timeVotes: { [localAt(3, 18).toISOString()]: ["m_sam"] }, ...plan },
+    };
+  }
+  const seedGroup = (group, extra = {}) => fakeDb.seed({ workspaces: [{ slug: SLUG, state: group, updated_at: new Date().toISOString() }], ...extra });
+
+  /** A browser subscription stand-in: real keys (so the server can encrypt), a fake push service endpoint. */
+  function stubPushInBrowser(context, endpoint) {
+    const ecdh = createECDH("prime256v1");
+    ecdh.generateKeys();
+    const keys = { p256dh: ecdh.getPublicKey().toString("base64url"), auth: randomBytes(16).toString("base64url") };
+    return context.addInitScript(({ endpoint: url, keys: subscriptionKeys }) => {
+      // Headless Chromium can't show the permission prompt, so this stands in for it:
+      // "default" until asked, then the person taps Allow.
+      window.__permissionAsked = 0;
+      let permission = "default";
+      Object.defineProperty(Notification, "permission", { get: () => permission, configurable: true });
+      Notification.requestPermission = async () => {
+        window.__permissionAsked += 1;
+        permission = "granted";
+        return permission;
+      };
+      let current = null;
+      const make = () => ({ endpoint: url, toJSON: () => ({ endpoint: url, keys: subscriptionKeys }), unsubscribe: async () => ((current = null), true) });
+      PushManager.prototype.subscribe = async () => (current = make());
+      PushManager.prototype.getSubscription = async () => current;
+    }, { endpoint, keys });
+  }
+
+  browserTest("the bell: 'X proposed a plan' and 'you haven't voted', then 'time chosen' and 'starts in 40 minutes' (a guest sees them too)", { db: true }, async ({ page, go }) => {
+    await seedGroup(planGroup());
+    await go(`/g/${SLUG}?i=${CODE}`);
+    await page.locator("#guestJoinForm").waitFor();
+    await page.fill("#guestName", "Casey");
+    await page.locator("#guestJoinForm button[type=submit]").click();
+    await page.locator("#guestBanner").waitFor();
+    assert.equal(await page.locator("#activityDot").isVisible(), true, "the bell has news");
+    await page.locator("#activityButton").click();
+    const titles = await texts(page, "#noticeList .notice-row strong");
+    assert.deepEqual([...titles].sort(), ["Alexi proposed a plan", "You haven't voted yet"]);
+    assert.equal(await page.locator("#noticeList .notice-row.unseen").count(), 2);
+    assert.equal(await page.locator("#pushCard").isVisible(), true);
+    assert.match(await page.locator("#pushCard").innerText(), /Sign in/, "guests are offered sign-in for notifications");
+    await page.locator("#activityDialog .close-dialog").click();
+    assert.equal(await page.locator("#activityDot").isVisible(), false, "seen");
+
+    // Voting clears "you haven't voted".
+    await page.locator(".time-vote").first().click();
+    await toastSays(page, /Vote added/);
+    await page.locator("#activityButton").click();
+    assert.deepEqual(await texts(page, "#noticeList .notice-row strong"), ["Alexi proposed a plan"]);
+    await page.locator("#activityDialog .close-dialog").click();
+
+    // Alexi picks a time that starts in 40 minutes.
+    const soon = new Date(Date.now() + 40 * 60e3);
+    soon.setSeconds(0, 0);
+    const tables = await fakeDb.tables();
+    const group = tables.workspaces[0].state;
+    group.plan = { ...group.plan, chosen: soon.toISOString(), chosenEnd: new Date(soon.getTime() + 2 * 3600e3).toISOString(), chosenBy: "m_alexi" };
+    await seedGroup(group);
+    await go(`/?w=${SLUG}`);
+    await page.locator("#guestBanner").waitFor();
+    await page.locator("#activityButton").click();
+    const now = await texts(page, "#noticeList .notice-row strong");
+    assert.ok(now.includes("Time chosen"), now.join(" | "));
+    assert.ok(now.some((title) => /^Dinner starts in (39|40) minutes$/.test(title)), now.join(" | "));
+    assert.ok(!(await page.locator("#noticeList").innerText()).includes("Luma"), "never the place");
+  });
+
+  browserTest("turn on notifications: asked only on a tap, the device is saved, and a new plan reaches it", { db: true, signedIn: true, serviceWorkers: true }, async ({ page, context, go, open }) => {
+    await seedGroup({ ...planGroup(), plan: null });
+    const sam = await open({ as: "sam" });
+    await stubPushInBrowser(sam.context, "https://push.waddle.test/sam-browser");
+    await sam.go(`/?w=${SLUG}`);
+    await sam.page.waitForFunction(() => document.querySelector("#workspaceName")?.textContent === "Book club");
+    assert.equal(await sam.page.evaluate(() => window.__permissionAsked), 0, "never asked on page load");
+    await sam.page.locator("#activityButton").click();
+    await sam.page.locator("#pushToggle").waitFor();
+    assert.equal(await sam.page.locator("#pushToggle").innerText(), "Turn on notifications");
+    await sam.page.locator("#pushToggle").click();
+    await toastSays(sam.page, /Notifications are on for this device/);
+    assert.equal(await sam.page.evaluate(() => window.__permissionAsked), 1);
+    const saved = await eventually(async () => (await fakeDb.tables()).push_subscriptions?.find((row) => row.endpoint === "https://push.waddle.test/sam-browser"), "Sam's device saved");
+    assert.equal(saved.user_id, SAM);
+    assert.equal(await sam.page.locator("#pushToggle").innerText(), "Turn off");
+    await sam.page.locator("#weeklyToggle").check();
+    await toastSays(sam.page, /Thursdays/);
+    await eventually(async () => (await fakeDb.tables()).push_subscriptions.find((row) => row.user_id === SAM)?.weekly_nudge === true, "weekly opt-in saved");
+
+    // Alexi proposes a plan: Sam's device gets a push (through the fake push service).
+    await go(`/?w=${SLUG}`);
+    await page.waitForFunction(() => document.querySelector("#workspaceName")?.textContent === "Book club");
+    await page.locator("#tentativePlanButton").click();
+    await page.fill("#planActivity", "Bowling");
+    await page.locator("#tentativePlanForm button[type=submit]").click();
+    const pushed = await eventually(async () => (await fakeDb.tables())._push?.find((entry) => entry.endpoint.endsWith("/sam-browser")), "a push to Sam");
+    assert.equal(pushed.encoding, "aes128gcm", "an encrypted Web Push message");
+    assert.equal((await fakeDb.tables()).workspaces[0].state.plan.createdBy, "m_alexi");
+  });
+
+  browserTest("the proposer nudges people who haven't voted, once per 12 hours", { db: true, signedIn: true }, async ({ page, go }) => {
+    const ecdh = createECDH("prime256v1");
+    ecdh.generateKeys();
+    await seedGroup(planGroup({ timeVotes: {} }), {
+      push_subscriptions: [{ id: "s1", user_id: SAM, endpoint: "https://push.waddle.test/sam-phone", p256dh: ecdh.getPublicKey().toString("base64url"), auth: randomBytes(16).toString("base64url"), weekly_nudge: false }],
+      notification_log: [],
+    });
+    await go(`/?w=${SLUG}`);
+    const nudge = page.locator("#nudgeVoters");
+    await nudge.waitFor();
+    assert.equal(await nudge.innerText(), "Nudge people who haven't voted (1)");
+    await nudge.click();
+    await toastSays(page, /Nudged 1 person: they'll see it in the bell\. 1 got a notification/);
+    await page.waitForFunction(() => document.querySelector("#nudgeVoters").disabled);
+    assert.match(await nudge.innerText(), /^Nudged · again /);
+    const tables = await fakeDb.tables();
+    assert.deepEqual(tables._push.map((entry) => entry.endpoint), ["https://push.waddle.test/sam-phone"]);
+    assert.match(tables.workspaces[0].state.activity[0].message, /nudged people who haven't voted/);
+    await go(`/?w=${SLUG}`);
+    await nudge.waitFor();
+    assert.equal(await nudge.isDisabled(), true, "still waiting after a reload");
   });
 });
