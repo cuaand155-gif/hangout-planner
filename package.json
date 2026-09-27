@@ -13,6 +13,7 @@
     "test:e2e": "node --test --test-concurrency=1 \"test/e2e/*.e2e.mjs\""
   },
   "dependencies": {
-    "@vercel/og": "0.8.5"
+    "@vercel/og": "0.8.5",
+    "web-push": "3.6.7"
   }
 }

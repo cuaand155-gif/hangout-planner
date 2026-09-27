@@ -50,7 +50,7 @@ export function contains(value, wanted) {
 }
 
 function readPath(row, expression) {
-  const match = /^([a-z_]+)(?:(->>?)([a-z_]+))?$/i.exec(expression);
+  const match = /^([a-z0-9_]+)(?:(->>?)([a-z0-9_]+))?$/i.exec(expression);
   if (!match) return undefined;
   const base = row[match[1]];
   if (!match[2]) return base;
@@ -67,6 +67,10 @@ function compare(a, b) {
 }
 
 function filterFor(column, raw) {
+  if (raw.startsWith("not.")) {
+    const inner = filterFor(column, raw.slice(4));
+    return (row) => !inner(row);
+  }
   const dot = raw.indexOf(".");
   const op = raw.slice(0, dot);
   const argument = raw.slice(dot + 1);
@@ -119,7 +123,21 @@ const RESERVED = new Set(["select", "order", "limit", "offset", "on_conflict", "
  * Makes a fake. `tables` seeds rows, `users` maps bearer tokens to users, and
  * `rpc` maps function names to (args, db, user) => result.
  */
+/** Database functions the server calls, as supabase/schema.sql defines them. */
+const DEFAULT_RPC = {
+  // Bumps today's count for one metric (analytics_daily).
+  count_metric({ p_metric, p_amount = 1 }, db) {
+    const day = new Date().toISOString().slice(0, 10);
+    db.analytics_daily ||= [];
+    const row = db.analytics_daily.find((entry) => entry.day === day && entry.metric === p_metric);
+    if (row) row.count += p_amount;
+    else db.analytics_daily.push({ day, metric: p_metric, count: p_amount });
+    return null;
+  },
+};
+
 export function createFakeSupabase({ tables = {}, users = FAKE_USERS, rpc = {} } = {}) {
+  rpc = { ...DEFAULT_RPC, ...rpc };
   const db = { workspaces: [], ...structuredClone(tables) };
   const accounts = { ...users };
   const calls = [];
@@ -241,13 +259,29 @@ export function createFakeSupabase({ tables = {}, users = FAKE_USERS, rpc = {} }
  * Routes every fetch to FAKE_SUPABASE_URL into `fake` and sets the env vars
  * the handlers read. Returns a function that puts everything back.
  */
+// A stand-in push service: subscriptions made in tests point here, and every
+// message the server sends is recorded in fake.db._push instead of delivered.
+// An endpoint with "/gone" in it answers 410, as a real one does for a device
+// that unsubscribed.
+export const FAKE_PUSH_ORIGIN = "https://push.waddle.test";
+
+function fakePush(fake, url, init = {}) {
+  (fake.db._push ||= []).push({ endpoint: url, ttl: headerOf(init, "TTL"), encoding: headerOf(init, "Content-Encoding"), bytes: init.body ? init.body.length : 0, at: new Date().toISOString() });
+  return new Response(null, { status: /\/gone/.test(url) ? 410 : 201 });
+}
+
 export function installFakeSupabase(fake = createFakeSupabase()) {
   const realFetch = globalThis.fetch;
   const previous = { SUPABASE_URL: process.env.SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY, NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL };
   process.env.SUPABASE_URL = FAKE_SUPABASE_URL;
   process.env.SUPABASE_SERVICE_ROLE_KEY = FAKE_SERVICE_KEY;
   delete process.env.NEXT_PUBLIC_SUPABASE_URL;
-  globalThis.fetch = (input, init) => (String(input?.url || input).startsWith(FAKE_SUPABASE_URL) ? fake.fetch(String(input?.url || input), init) : realFetch(input, init));
+  globalThis.fetch = (input, init) => {
+    const url = String(input?.url || input);
+    if (url.startsWith(FAKE_SUPABASE_URL)) return fake.fetch(url, init);
+    if (url.startsWith(FAKE_PUSH_ORIGIN)) return Promise.resolve(fakePush(fake, url, init));
+    return realFetch(input, init);
+  };
   return () => {
     globalThis.fetch = realFetch;
     for (const [key, value] of Object.entries(previous)) {

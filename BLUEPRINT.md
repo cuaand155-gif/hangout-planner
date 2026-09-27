@@ -2,7 +2,7 @@
 
 The complete picture of what Waddle is supposed to do, where each piece lives, what proves it works, and what's left. Use it as the checklist before calling Waddle "done", and update it whenever a feature is added or changed. The product rules for what each view may show are in [CLAUDE.md](CLAUDE.md) and win over anything here.
 
-Last checked: 2026-09-26 (database rules on the live project: 38/38, before the phone-number checks were added). Tests: 2026-09-26, with friends without groups, phone sign-in, organization groups and always-busy hours, merged with guest invite links: 263 unit/API tests and 60 browser tests, all passing.
+Last checked: 2026-09-27, with notifications (bell, push, nudges, reminders): 279 unit/API tests and 66 browser tests, all passing; `rls-server-test.sql` 10/10 on the live project.
 
 ## 1. What Waddle is
 
@@ -16,8 +16,8 @@ Live: https://hangout-planner-omega.vercel.app (also hangout-planner-cuacua.verc
 |---|---|---|
 | App | Vanilla JS, no build step: one page plus the public booking page | `index.html`, `app.js`, `styles.css`, `book.html`, `book.js`, `booking-owner.js`, `lib/*.js` |
 | Offline / install | Service worker and manifest (installable on a phone home screen) | `sw.js`, `manifest.webmanifest`, `lib/pwa.js` |
-| Server | Vercel functions | `api/workspace.js` (groups), `api/groups.js`, `api/calendar.js` (ICS links), `api/google.js` (Google sync), `api/book.js` (booking links), `api/_email.js` (booking emails) |
-| Database | Supabase Postgres with row-level security | Tables: `workspaces`, `profiles`, `friend_requests`, `calendar_shares`, `sharing_settings`, `presence`, `booking_pages`, `bookings`, `google_tokens`. Schema in `supabase/schema.sql`; policy checks in `supabase/rls-*.sql` |
+| Server | Vercel functions | `api/workspace.js` (groups), `api/push.js`, `api/notify.js`, `api/cron.js` (notifications), `api/page.js`, `api/og.js` (link previews), `api/groups.js`, `api/calendar.js` (ICS links), `api/google.js` (Google sync), `api/book.js` (booking links), `api/_email.js` (booking emails) |
+| Database | Supabase Postgres with row-level security | Tables: `workspaces`, `profiles`, `friend_requests`, `calendar_shares`, `sharing_settings`, `presence`, `booking_pages`, `bookings`, `google_tokens`, `push_subscriptions`, `notification_log`. Schema in `supabase/schema.sql`; policy checks in `supabase/rls-*.sql` |
 | Sign-in | Google, or a texted code to your phone, through Supabase Auth | `app.js` (`signInWithOAuth`, `signInWithOtp`/`verifyOtp`), `lib/phone.js` |
 | Hosting | Vercel project `hangout-planner`, deploys `master` automatically | `vercel.json` |
 
@@ -28,6 +28,8 @@ Live: https://hangout-planner-omega.vercel.app (also hangout-planner-cuacua.verc
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (+ Supabase integration vars) | ✅ set | Groups, friends, sharing, booking links |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | ✅ set 2026-09-25 | Google Calendar keeps syncing past an hour; booking links check Google while Waddle is closed |
 | `RESEND_API_KEY`, `BOOKING_EMAIL_FROM` | ⬜ not set (needs a domain you own) | Booking confirmation and cancellation emails |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | ✅ set 2026-09-27 | Phone/desktop push notifications |
+| `CRON_SECRET` (also in Supabase Vault as `waddle_cron_secret`) | ✅ set 2026-09-27 | Supabase `pg_cron` calls `/api/cron` every 15 minutes (plan reminders) and Thursdays 21:00 UTC ("Who's free this weekend?") |
 
 ## 3. Feature inventory
 
@@ -99,6 +101,10 @@ Status key: ✅ proven by an automated browser test · 🧪 proven by unit/API t
 | Repeating plans (weekly etc.) | `#planRepeat` | e2e "repeating plans roll on…"; `hangout` tests | ✅ |
 | Add to calendar (.ics file or Google link) | `lib/calendar-export.js` | e2e "add to calendar…" (the .ics file and the Google link's contents; Google itself is never opened); `calendar-export` tests | ✅ |
 | Activity ideas with photos | Ideas section | e2e "an idea with a photo…"; `idea-photos` tests | ✅ |
+| Notification bell: "X proposed a plan", "you haven't voted", "time chosen", "starts soon" (guests too) | `lib/notifications.js`, `#activityButton` | e2e "the bell…"; `notify` tests | ✅ |
+| Push notifications: opt in with a tap, a new plan reaches your devices | `lib/push.js`, `api/push.js`, `api/notify.js`, `push_subscriptions` | e2e "turn on notifications…" (push service stubbed); `notify` tests; `supabase/rls-server-test.sql` (10/10 on the live project, 2026-09-27) | ✅ (a real phone receiving one: 🙋) |
+| Nudge people who haven't voted (once per 12 hours) | `api/notify.js` | e2e "the proposer nudges…"; `notify` tests | ✅ |
+| Hour-before reminders and the weekly "Who's free this weekend?" (opt-in) | `api/cron.js`, Supabase `pg_cron` | `notify` tests (cron) | 🧪 (runs on a schedule on the server, no screen) |
 
 ### Booking links
 

@@ -542,3 +542,81 @@ create table if not exists public.google_tokens (
 
 alter table public.google_tokens enable row level security;
 revoke all on public.google_tokens from anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Push notifications
+-- ---------------------------------------------------------------------------
+-- One row per device that turned notifications on (api/push.js). People can
+-- only ever see or change their own devices; the server (service role) reads
+-- them to send. notification_log makes each notification go out once, and
+-- only the server touches it.
+
+create table if not exists public.push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  endpoint text not null unique check (endpoint ~ '^https://' and char_length(endpoint) <= 1000),
+  p256dh text not null check (char_length(p256dh) between 20 and 200),
+  auth text not null check (char_length(auth) between 8 and 100),
+  weekly_nudge boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists push_subscriptions_user on public.push_subscriptions (user_id);
+create index if not exists push_subscriptions_weekly on public.push_subscriptions (weekly_nudge) where weekly_nudge;
+
+alter table public.push_subscriptions enable row level security;
+revoke all on public.push_subscriptions from anon;
+
+drop policy if exists "People read their own devices" on public.push_subscriptions;
+create policy "People read their own devices"
+  on public.push_subscriptions for select to authenticated using (auth.uid() = user_id);
+
+drop policy if exists "People add their own devices" on public.push_subscriptions;
+create policy "People add their own devices"
+  on public.push_subscriptions for insert to authenticated with check (auth.uid() = user_id);
+
+drop policy if exists "People update their own devices" on public.push_subscriptions;
+create policy "People update their own devices"
+  on public.push_subscriptions for update to authenticated using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "People remove their own devices" on public.push_subscriptions;
+create policy "People remove their own devices"
+  on public.push_subscriptions for delete to authenticated using (auth.uid() = user_id);
+
+create table if not exists public.notification_log (
+  key text primary key check (char_length(key) <= 300),
+  created_at timestamptz not null default now()
+);
+alter table public.notification_log enable row level security;
+revoke all on public.notification_log from anon, authenticated;
+
+-- Reminders: pg_cron calls /api/cron through pg_net every 15 minutes, and on
+-- Thursdays at 21:00 UTC for "Who's free this weekend?". The Bearer secret is
+-- the Vercel CRON_SECRET, stored once in Vault (never in this file):
+--   select vault.create_secret('<CRON_SECRET>', 'waddle_cron_secret');
+-- Change the URL below if the app moves to its own domain.
+create extension if not exists pg_cron;
+create extension if not exists pg_net with schema extensions;
+
+create or replace function public.call_waddle_cron(job text)
+returns bigint
+language sql
+security definer
+set search_path = public, extensions
+as $$
+  select net.http_post(
+    url := 'https://hangout-planner-omega.vercel.app/api/cron?job=' || job,
+    headers := jsonb_build_object(
+      'Content-Type', 'application/json',
+      'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'waddle_cron_secret')
+    ),
+    body := '{}'::jsonb,
+    timeout_milliseconds := 20000
+  );
+$$;
+revoke execute on function public.call_waddle_cron(text) from public, anon, authenticated;
+
+select cron.unschedule(jobid) from cron.job where jobname in ('waddle-reminders', 'waddle-weekly');
+select cron.schedule('waddle-reminders', '*/15 * * * *', $$ select public.call_waddle_cron('reminders') $$);
+select cron.schedule('waddle-weekly', '0 21 * * 4', $$ select public.call_waddle_cron('weekly') $$);
