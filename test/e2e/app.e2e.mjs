@@ -16,7 +16,7 @@ import { PLAYWRIGHT_PATH, loadPlaywright, openSession } from "../../.claude/skil
 import { parseIcs } from "../../lib/ics.js";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
-const state = { playwright: null, browser: null, server: null, base: "", skip: "" };
+const state = { playwright: null, browser: null, server: null, base: "", dbServer: null, dbBase: "", skip: "" };
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -30,10 +30,10 @@ function freePort() {
   });
 }
 
-async function startServer() {
+async function startServer(extraEnv = {}) {
   const port = await freePort();
-  // A clean environment: demo mode, whatever the shell has set.
-  const env = { PATH: process.env.PATH, HOME: process.env.HOME, PORT: String(port) };
+  // A clean environment: demo mode (or the in-memory fake database), whatever the shell has set.
+  const env = { PATH: process.env.PATH, HOME: process.env.HOME, PORT: String(port), ...extraEnv };
   const server = spawn(process.execPath, ["scripts/dev-server.mjs", String(port)], { cwd: ROOT, env, stdio: ["ignore", "pipe", "pipe"] });
   let log = "";
   server.stdout.on("data", (chunk) => (log += chunk));
@@ -67,14 +67,19 @@ before(async () => {
     console.log(`# ${state.skip}`);
     return;
   }
-  ({ server: state.server, base: state.base } = await startServer());
+  // Two servers: demo mode for most flows, and one that runs the real API
+  // handlers against scripts/fake-supabase.mjs (tests with `db: true`).
+  const [demo, withDb] = await Promise.all([startServer(), startServer({ WADDLE_FAKE_DB: "1" })]);
+  ({ server: state.server, base: state.base } = demo);
+  ({ server: state.dbServer, base: state.dbBase } = withDb);
 });
 
 after(async () => {
   await state.browser?.close();
-  if (state.server && state.server.exitCode === null) {
-    const exited = new Promise((resolve) => state.server.once("exit", resolve));
-    state.server.kill();
+  for (const server of [state.server, state.dbServer]) {
+    if (!server || server.exitCode !== null) continue;
+    const exited = new Promise((resolve) => server.once("exit", resolve));
+    server.kill();
     await exited;
   }
 });
@@ -86,15 +91,16 @@ after(async () => {
  * options plus the ones given. Page errors in any of them fail the test at the
  * end, except ones matching `allowErrors`. `serviceWorkers: true` lets sw.js run.
  */
-function browserTest(name, { allowErrors = null, serviceWorkers = false, ...options }, run) {
+function browserTest(name, { allowErrors = null, serviceWorkers = false, db = false, ...options }, run) {
   test(name, async (t) => {
     if (state.skip) return t.skip(state.skip);
     const opened = [];
+    const base = db ? state.dbBase : state.base;
     const open = async (extra = {}) => {
       const session = await openSession({ playwright: state.playwright, browser: state.browser, blockServiceWorkers: !serviceWorkers, ...options, ...extra });
       opened.push(session);
       const go = async (path, { app = true } = {}) => {
-        await session.page.goto(new URL(path, state.base).href);
+        await session.page.goto(new URL(path, base).href);
         // The app renders the group after its first /api/workspace reply.
         if (app) await session.page.locator("#calendarGrid .slot").first().waitFor({ state: "attached", timeout: 10000 });
         await session.page.waitForLoadState("networkidle");
@@ -1800,5 +1806,208 @@ describe("always busy", () => {
     await page.waitForFunction((id) => (JSON.parse(localStorage.getItem("gatherly-workspace:weekend-crew")).members.find((m) => m.userId === id)?.blocked || []).length === 1, ALEXI);
     await page.locator("#blockedDialog .close-dialog").click();
     assert.doesNotMatch(await page.locator(`.slot[data-iso="${monday.iso}"][data-hour="10"]`).getAttribute("class"), /\bbusy\b/);
+  });
+});
+
+describe("guests: invite links work without an account", () => {
+  const CODE = "GuestLinkCode0123456789A";
+  const SLUG = "book-club-gu3st";
+
+  /** The fake database behind the `db: true` server. */
+  const db = {
+    async seed(tables) {
+      const response = await fetch(`${state.dbBase}/__fake-db`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tables }) });
+      assert.ok(response.ok);
+    },
+    async group(slug = SLUG) {
+      const tables = await (await fetch(`${state.dbBase}/__fake-db`)).json();
+      return tables.workspaces.find((row) => row.slug === slug)?.state || null;
+    },
+  };
+
+  /** A group that allows event details, where Alexi shares a named event with a place, and a plan with a time picked. */
+  function detailedGroup() {
+    const coverage = { from: localIso(-7), to: localIso(21) };
+    return {
+      name: "Book club",
+      privacy: "details",
+      ownerId: ALEXI,
+      invite: { code: CODE, revoked: false, createdAt: new Date().toISOString() },
+      members: [
+        { id: "m_alexi", name: "Alexi", userId: ALEXI, email: "alexi@example.com", coverage, busy: [{ start: localAt(0, 10).toISOString(), end: localAt(0, 12).toISOString(), title: "Climbing", location: "Basecamp", source: "ics" }] },
+        { id: "m_sam", name: "Sam Rivera", userId: SAM, email: "sam@example.com", coverage, busy: [{ start: localAt(0, 14).toISOString(), end: localAt(0, 15).toISOString(), title: "Dentist", location: "Bloor St", source: "google" }] },
+      ],
+      ideas: [{ id: "idea_walk", title: "Walk by the lake", votes: ["m_alexi"] }],
+      plan: {
+        id: "plan_dinner",
+        activity: "Dinner",
+        location: "Luma",
+        audience: "Book club",
+        timing: "month",
+        chosen: localAt(2, 18).toISOString(),
+        chosenEnd: localAt(2, 20).toISOString(),
+        timeVotes: { [localAt(3, 18).toISOString()]: ["m_alexi"] },
+      },
+      activity: [{ message: "Tentative plan: Dinner", at: new Date().toISOString() }],
+    };
+  }
+
+  const seedGroup = (state = detailedGroup()) => db.seed({ workspaces: [{ slug: SLUG, state, updated_at: new Date().toISOString() }] });
+
+  /** Every /api/workspace answer the page gets, as text. */
+  function recordAnswers(page) {
+    const answers = [];
+    page.on("response", async (response) => {
+      if (!response.url().includes("/api/workspace")) return;
+      answers.push(await response.text().catch(() => ""));
+    });
+    return answers;
+  }
+
+  async function joinAs(page, go, name, link = `/?w=${SLUG}&i=${CODE}`) {
+    await go(link);
+    await page.locator("#guestJoinForm").waitFor();
+    await page.fill("#guestName", name);
+    await page.locator("#guestJoinForm button[type=submit]").click();
+    await page.locator("#guestBanner").waitFor();
+    await page.waitForFunction(() => document.querySelector("#signInGate").hidden);
+  }
+
+  const guestId = async (name = "Casey") => (await db.group()).members.find((member) => member.name === name)?.id;
+
+  browserTest("a guest joins with just a name, marks busy hours, votes on a time and RSVPs", { db: true }, async ({ page, go }) => {
+    await seedGroup();
+    await go(`/?w=${SLUG}&i=${CODE}`);
+    await page.locator("#guestJoinForm").waitFor();
+    assert.equal(await page.locator("#gateTitle").innerText(), "Join Book club");
+    assert.equal(await page.locator(".main-content").isVisible(), false, "nothing of the group before joining");
+    await page.fill("#guestName", "Casey");
+    await page.locator("#guestJoinForm button[type=submit]").click();
+    await page.locator("#guestBanner").waitFor();
+    assert.match(await page.locator("#guestBanner").innerText(), /You're in as Casey/);
+    assert.match(await page.locator("#guestBanner").innerText(), /Sign in to save and connect your calendar/);
+    const id = await guestId();
+    assert.ok(id, "the server made Casey's row");
+    assert.match(await page.locator(".person-card.is-you").innerText(), /Casey/);
+
+    // Only what a guest may do is on screen.
+    for (const selector of ["#tentativePlanButton", "#addIdea", "#privacyButton", "#editTentativePlan", ".card-remove"]) {
+      assert.equal(await page.locator(selector).first().isVisible(), false, `${selector} is for members`);
+    }
+
+    // Vote on the other time, and RSVP to the picked one.
+    await page.locator(".time-vote").first().click();
+    await toastSays(page, /Vote added/);
+    await eventually(async () => (await db.group()).plan.timeVotes[localAt(3, 18).toISOString()]?.includes(id), "the vote in the database");
+    await page.locator('[data-rsvp="yes"]').click();
+    await toastSays(page, /You’re going/);
+    await eventually(async () => (await db.group()).plan.rsvp?.answers?.[id] === "yes", "the RSVP in the database");
+    assert.match(await page.locator("#rsvpSummary").innerText(), /Going: Casey/);
+    assert.equal(await page.locator(".time-option [data-window]").first().isDisabled(), true, "picking the time is the group's");
+
+    // Mark an hour busy.
+    await page.locator("#mineViewTab").click();
+    await page.locator(`#calendarGrid .slot[data-iso="${localIso(0)}"][data-hour="9"]`).click();
+    await eventually(async () => (await db.group()).members.find((member) => member.id === id).busy.length === 1, "Casey's busy hour");
+    const [block] = (await db.group()).members.find((member) => member.id === id).busy;
+    assert.deepEqual(Object.keys(block).sort(), ["end", "source", "start"]);
+
+    // The pass is kept: coming back (even by the plain group link) needs no second join.
+    await go(`/?w=${SLUG}`);
+    await page.locator("#guestBanner").waitFor();
+    assert.equal(await page.locator("#signInGate").isHidden(), true);
+  });
+
+  browserTest("a guest never sees event names or places, even though the group allows event details", { db: true }, async ({ page, go, open }) => {
+    await seedGroup();
+    const answers = recordAnswers(page);
+    await joinAs(page, go, "Casey");
+    const everything = await page.evaluate(() => document.body.innerText + JSON.stringify(localStorage));
+    for (const secret of ["Climbing", "Basecamp", "Dentist", "Bloor St", "alexi@example.com", "sam@example.com"]) {
+      assert.ok(!everything.includes(secret), `the page shows ${secret}`);
+      assert.ok(!answers.some((text) => text.includes(secret)), `the API sent ${secret}`);
+    }
+    assert.match(await page.locator("#privacyStatus").innerText(), /Busy \/ free only/);
+    assert.match(await page.locator("#groupCalGrid").innerText(), /Alexi[\s\S]*Busy/);
+    assert.equal(await page.locator("#calendarGrid .event-chip").count(), 0, "no named blocks on the week");
+    assert.match(await page.locator("#tentativeTitle").innerText(), /Dinner · Luma/, "the plan itself is shown");
+
+    // The owner, signed in, still sees names: members keep today's behaviour.
+    const alexi = await open({ signedIn: true });
+    await alexi.go(`/?w=${SLUG}`);
+    await alexi.page.waitForFunction(() => document.querySelector("#workspaceName")?.textContent === "Book club");
+    assert.match(await alexi.page.locator("#groupCalGrid").innerText(), /Dentist[\s\S]*Bloor St/);
+  });
+
+  browserTest("turning the invite link off locks guests out and stops new ones; a new link works", { db: true, allowErrors: /status of 403/ }, async ({ page, go, open }) => {
+    await seedGroup();
+    await joinAs(page, go, "Casey");
+
+    const alexi = await open({ signedIn: true });
+    await alexi.go(`/?w=${SLUG}`);
+    await alexi.page.locator("#managePeople").click();
+    assert.equal(await alexi.page.locator("#inviteLink").inputValue(), `${state.dbBase}/?w=${SLUG}&i=${CODE}`);
+    assert.match(await alexi.page.locator("#savedPeople").innerText(), /Casey\s*Guest/);
+    await alexi.page.locator("#revokeInvite").click();
+    await toastSays(alexi.page, /Invite link turned off/);
+    assert.equal((await db.group()).invite.revoked, true);
+    assert.equal(await alexi.page.locator("#inviteLink").inputValue(), `${state.dbBase}/?w=${SLUG}`, "no code to share while it's off");
+
+    await go(`/?w=${SLUG}`, { app: true });
+    await page.locator("#signInGate").waitFor();
+    assert.equal(await page.locator("#gateTitle").innerText(), "This invite link doesn't work any more");
+    assert.equal(await page.locator(".main-content").isVisible(), false);
+
+    const stranger = await open();
+    await stranger.go(`/?w=${SLUG}&i=${CODE}`);
+    await stranger.page.locator("#signInGate").waitFor();
+    assert.equal(await stranger.page.locator("#guestJoinForm").isHidden(), true, "nobody new can join");
+
+    await alexi.page.locator("#renewInvite").click();
+    await toastSays(alexi.page, /New invite link made/);
+    const fresh = (await db.group()).invite.code;
+    assert.notEqual(fresh, CODE);
+    await go(`/?w=${SLUG}&i=${fresh}`);
+    await page.locator("#guestBanner").waitFor();
+    assert.match(await page.locator(".person-card.is-you").innerText(), /Casey/, "the same guest, back in with the new link");
+  });
+
+  browserTest("the owner removes a guest, and their votes disappear", { db: true, allowErrors: /status of 403/ }, async ({ page, go, open }) => {
+    await seedGroup();
+    await joinAs(page, go, "Casey");
+    const id = await guestId();
+    await page.locator(".time-vote").first().click();
+    await toastSays(page, /Vote added/);
+    await page.locator(".idea-card .heart").first().click();
+    await toastSays(page, /Vote added/);
+    await eventually(async () => (await db.group()).ideas[0].votes.includes(id), "Casey's idea vote");
+
+    const alexi = await open({ signedIn: true });
+    await alexi.go(`/?w=${SLUG}`);
+    await alexi.page.locator("#managePeople").click();
+    await alexi.page.locator(`#savedPeople [data-remove-member="${id}"]`).click();
+    await toastSays(alexi.page, /Casey removed, with their votes/);
+    const after = await db.group();
+    assert.ok(!JSON.stringify(after).includes(id), "no row, vote, RSVP or pass left");
+    assert.deepEqual(after.plan.timeVotes[localAt(3, 18).toISOString()], ["m_alexi"]);
+    assert.deepEqual(after.ideas[0].votes, ["m_alexi"]);
+
+    // Casey's next change is refused and the page says why.
+    await page.locator(".time-vote").first().click();
+    await page.locator("#guestJoinForm").waitFor();
+    assert.match(await page.locator("#gateNote").innerText(), /no longer in this group/);
+  });
+
+  browserTest("the join card and guest banner on a phone, in dark mode", { db: true, phone: true, theme: "dark" }, async ({ page, go }) => {
+    await seedGroup();
+    await go(`/?w=${SLUG}&i=${CODE}`);
+    await page.locator("#guestJoinForm").waitFor();
+    const card = await page.locator(".signin-card").boundingBox();
+    assert.ok(card.width <= 390, "fits the phone");
+    await page.fill("#guestName", "Casey");
+    await page.locator("#guestJoinForm button[type=submit]").click();
+    await page.locator("#guestBanner").waitFor();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, "nothing scrolls sideways");
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark");
   });
 });

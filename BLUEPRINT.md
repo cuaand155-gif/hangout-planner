@@ -2,7 +2,7 @@
 
 The complete picture of what Waddle is supposed to do, where each piece lives, what proves it works, and what's left. Use it as the checklist before calling Waddle "done", and update it whenever a feature is added or changed. The product rules for what each view may show are in [CLAUDE.md](CLAUDE.md) and win over anything here.
 
-Last checked: 2026-09-26 (database rules on the live project: 38/38, before the phone-number checks were added). Tests: 2026-09-26, with friends without groups, phone sign-in, organization groups and always-busy hours: 248 unit/API tests and 55 browser tests, all passing.
+Last checked: 2026-09-26 (database rules on the live project: 38/38, before the phone-number checks were added). Tests: 2026-09-26, with friends without groups, phone sign-in, organization groups and always-busy hours, merged with guest invite links: 263 unit/API tests and 60 browser tests, all passing.
 
 ## 1. What Waddle is
 
@@ -39,9 +39,13 @@ Status key: ✅ proven by an automated browser test · 🧪 proven by unit/API t
 |---|---|---|---|
 | Demo group loads with no errors | `app.js` | e2e "loads the demo group" | ✅ |
 | Sign in with a phone number (texted code) | Account dialog, sign-in gate | e2e "sign in with a phone number and a texted code" (fake Supabase) | ✅ in the app; 🙋 needs Phone sign-in turned on in Supabase with an SMS provider |
-| Opening a group needs sign-in (when the database is on) | `api/workspace.js` 401 gate | e2e "sign-in gate" (signed out: the gate, nothing loaded or saved; signed in: the group opens), with `/api/workspace` answering as it does with a database; `api`, `groups-api` tests | ✅ |
+| Opening a group needs sign-in or its invite link (when the database is on) | `api/workspace.js` 401 gate | e2e "sign-in gate" (signed out: the gate, nothing loaded or saved; signed in: the group opens), with `/api/workspace` answering as it does with a database; `api`, `groups-api` tests | ✅ |
 | Create, rename and switch between groups | "Your groups", `lib/groups.js`, `api/groups.js` | e2e "create a group, rename it, switch…"; `groups-api`, `groups-sync` tests | ✅ |
 | Invite link, add a placeholder person, remove someone | People dialog, `lib/membership.js` | e2e "invite link, a placeholder person, and removing people"; `membership` tests | ✅ |
+| Join from an invite link with just a name (guests): mark busy hours, vote on times and ideas, RSVP | Gate join card, `lib/guests.js`, `POST /api/workspace` guest actions | e2e "a guest joins with just a name, marks busy hours, votes on a time and RSVPs" (real API on the fake database); `guests` tests | ✅ |
+| Guests never see event names, places, emails or secrets, even when the group allows event details | `guestView` (server side) | e2e "a guest never sees event names or places…" (page text, storage and every API answer checked); `guests` tests | ✅ |
+| Owner turns the invite link off or makes a new one; removes a guest (votes go too) | People dialog `#inviteControls`, owner actions | e2e "turning the invite link off…", "the owner removes a guest, and their votes disappear"; `guests` API tests (only the owner may) | ✅ |
+| Guest writes are rate-limited (40 per 5 min per guest, 20 joins per hour per group) and size-capped (256 KB) | `countWrite`, `api/workspace.js` | `guests` API tests | 🧪 (server only, no screen) |
 | Friend requests (send, accept) | Friends page (sidebar), `lib/friends.js` | e2e "send a friend request, they accept it…" (two browsers); `friends` tests | ✅ |
 | Friends page: friends without a group | `#friendsDialog`, sidebar Friends | e2e "the Friends page: a request by phone number…" | ✅ |
 | Friend requests by phone number | `lib/friends.js`, `lib/phone.js`, `recipient_phone` | e2e "…by phone number, accepted by the person with that number" (two browsers); `friends`, `phone` tests; `supabase/rls-test.sql` phone checks | ✅ in the app; 🙋 run `schema.sql` and `rls-test.sql` on the live project |

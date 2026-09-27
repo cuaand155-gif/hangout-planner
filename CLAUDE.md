@@ -13,6 +13,7 @@ Read this before changing anything that shows calendar events or sharing. These 
 | **A friend's calendar** (Friends → Calendar) | That friend | Exactly what your "Who sees what" level for them allows, plus "You're both free": hours neither of you is busy, worked out from only what they share with you. |
 | **1-on-1** (Friends → 1-on-1) | You and that one friend | A two-person space with the group view's rules. No group needed. Both friends reach the same space (its link comes from their friendship, which only the two of them can read), and it is locked to the two of them. |
 | **Booking link** (public page) | Anyone with the link | Only open times, never event names or places. Private events still block bookings. |
+| **Guest view** (group opened from an invite link, no account) | Someone who joined with just a name | Everyone's busy/free, the plan, ideas, votes and RSVPs. **Never** event names or places (even when the group allows event details), emails, account ids or the invite secret: the server strips them (`guestView` in `lib/guests.js`). A guest can change only their own busy times, votes and RSVP. |
 
 Busy/free is the baseline everywhere; names and places are always something the owner switches on, never the default.
 
@@ -28,6 +29,7 @@ Busy/free is the baseline everywhere; names and places are always something the 
 - **Organization or business groups** (a club, team or workplace) are always busy/free only: event details can't be switched on, and names and places are stripped whenever the group is saved, on the server too.
 - **Always busy** hours (e.g. weekdays 9–5, sleep 11 pm–7 am) repeat every week and read as plain busy to groups, friends and booking links. Their labels stay in your own account settings and are never shared.
 - **Friends** are added by email or phone number and don't need a group. Sign-in is Google or a texted code to your phone.
+- **Invite links are a capability.** A group's link carries a secret code (`?i=`). Anyone with it can join as a guest with just a name; the server keeps only a hash of the guest's browser token. The owner can turn the link off or make a new one (either locks every guest out) and remove a guest (their votes and RSVP go too). A locked group ("Only signed-in members can edit") takes no guests. Guest writes go through `POST /api/workspace` actions, rate-limited, never a whole-group save.
 
 ## Working rules
 

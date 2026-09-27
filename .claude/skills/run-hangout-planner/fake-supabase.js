@@ -32,8 +32,12 @@
     }
   };
   const signedOut = localStorage.getItem("fake-user") === "none";
-  let user = signedOut ? null : USERS[localStorage.getItem("fake-user")] || USERS.alexi;
+  let who = USERS[localStorage.getItem("fake-user")] ? localStorage.getItem("fake-user") : "alexi";
+  let user = signedOut ? null : USERS[who];
   const listeners = [];
+  // What the API sees as the bearer token; scripts/fake-supabase.mjs (the
+  // server-side fake, WADDLE_FAKE_DB=1) resolves it to the same person.
+  const tokenFor = (name) => (name === "alexi" ? "fake-token" : `fake-token-${name}`);
   const seed = window.__seed || read("fake-seed") || {};
   localStorage.removeItem("fake-seed");
   const saved = read("fake-db") || {};
@@ -125,7 +129,7 @@
       return {
         auth: {
           // Coming back from "Connect Google Calendar" (?calendar) carries a Google token, like the real callback.
-          async getSession() { return { data: { session: user ? { user, access_token: "fake-token", ...(location.search.includes("calendar") ? { provider_token: "fake-google-token", provider_refresh_token: "fake-google-refresh" } : {}) } : null } }; },
+          async getSession() { return { data: { session: user ? { user, access_token: tokenFor(who), ...(location.search.includes("calendar") ? { provider_token: "fake-google-token", provider_refresh_token: "fake-google-refresh" } : {}) } : null } }; },
           onAuthStateChange(callback) { listeners.push(callback); return { data: { subscription: { unsubscribe() {} } } }; },
           async signInWithOAuth() { return { error: null }; },
           async signInWithOtp({ phone }) {
@@ -135,9 +139,10 @@
           async verifyOtp({ phone, token, type }) {
             calls.push(["auth", "verifyOtp", phone, type]);
             if (token !== "123456") return { data: null, error: { message: "Token has expired or is invalid" } };
+            who = "dana";
             user = USERS.dana;
             localStorage.setItem("fake-user", "dana");
-            const session = { user, access_token: "fake-token" };
+            const session = { user, access_token: tokenFor(who) };
             setTimeout(() => listeners.forEach((listener) => listener("SIGNED_IN", session)));
             return { data: { session, user }, error: null };
           },

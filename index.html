@@ -52,11 +52,17 @@
       <section class="signin-gate" id="signInGate" hidden aria-labelledby="gateTitle">
         <div class="signin-card">
           <p class="booking-brand"><span aria-hidden="true">🐧</span> waddle</p>
-          <p class="eyebrow">YOU'RE INVITED</p>
+          <p class="eyebrow" id="gateEyebrow">YOU'RE INVITED</p>
           <h1 id="gateTitle">Sign in to join this group</h1>
-          <p>Groups share when people are free, so only signed-in people can open them. It's free and takes one tap with Google.</p>
+          <p id="gateCopy">Groups share when people are free, so only signed-in people can open them. It's free and takes one tap with Google.</p>
+          <form class="guest-join" id="guestJoinForm" hidden>
+            <label class="field-label" for="guestName">Your name</label>
+            <input class="text-input" id="guestName" name="name" autocomplete="given-name" placeholder="Casey" required maxlength="60" />
+            <button class="primary-button full" type="submit">Join as a guest</button>
+          </form>
           <button class="primary-button full" type="button" id="gateSignIn">Sign in with Google</button>
           <button class="outline-button full" type="button" id="gatePhone">Use my phone number</button>
+          <p class="form-hint gate-note" id="gateNote"></p>
           <a class="text-button" href="/">Just looking? Try the demo group</a>
         </div>
       </section>
@@ -78,9 +84,14 @@
               <p class="hero-copy">Find a moment that works for everyone, then fill it with something worth remembering.</p>
             </div>
             <div class="hero-actions">
-              <button class="outline-button" id="tentativePlanButton"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg> Set a tentative plan</button>
+              <button class="outline-button member-only" id="tentativePlanButton"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg> Set a tentative plan</button>
               <button class="primary-button" id="inviteButton"><svg class="icon" aria-hidden="true"><use href="#i-user-plus"/></svg> Invite a friend</button>
             </div>
+          </section>
+
+          <section class="guest-banner" id="guestBanner" hidden aria-label="You're a guest">
+            <div><strong>You're in as <span id="guestBannerName">a guest</span>.</strong><small>Mark when you're busy, vote on a time and RSVP. Everyone sees busy or free, never what anyone is doing.</small></div>
+            <button class="outline-button" type="button" id="guestSignIn">Sign in to save and connect your calendar</button>
           </section>
 
           <section class="checklist-card" id="checklistCard" aria-labelledby="checklistTitle" hidden>
@@ -110,7 +121,7 @@
             <div class="status-card privacy-status">
               <div class="status-icon purple"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg></div>
               <div><small>PRIVACY</small><strong id="privacyStatus">Busy / free only</strong></div>
-              <button class="text-button" id="privacyButton">Manage</button>
+              <button class="text-button member-only" id="privacyButton">Manage</button>
             </div>
           </section>
 
@@ -120,8 +131,8 @@
             <div class="section-heading compact">
               <div><p class="eyebrow">JUST A THOUGHT</p><h2>Keep a maybe on the calendar</h2><p>Save the idea now and find the best time with your group later.</p></div>
               <div class="heading-actions">
-                <button class="text-button" id="editTentativePlan">Edit plan <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button>
-                <button class="text-button subtle" id="removeTentativePlan">Remove</button>
+                <button class="text-button member-only" id="editTentativePlan">Edit plan <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button>
+                <button class="text-button subtle member-only" id="removeTentativePlan">Remove</button>
               </div>
             </div>
             <article class="tentative-card">
@@ -190,7 +201,7 @@
             <div class="selected-window" id="selectedWindow" hidden>
               <div class="window-icon"><svg class="icon" aria-hidden="true"><use href="#i-sparkle"/></svg></div>
               <div><strong id="selectedWindowTitle"></strong><p id="selectedWindowDetail"></p></div>
-              <button class="primary-button small" id="planButton">Plan something <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button>
+              <button class="primary-button small member-only" id="planButton">Plan something <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button>
             </div>
             <div class="mine-actions" id="mineActions" hidden>
               <button class="outline-button" id="saveUsualWeek">Save as my usual week</button>
@@ -249,7 +260,7 @@
           <section class="ideas-section" id="ideas">
             <div class="section-heading compact">
               <div><p class="eyebrow">MAKE IT COUNT</p><h2>What sounds good?</h2></div>
-              <button class="outline-button" id="addIdea"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg> Add an idea</button>
+              <button class="outline-button member-only" id="addIdea"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg> Add an idea</button>
             </div>
             <div class="idea-grid" id="ideaGrid"></div>
           </section>
@@ -354,12 +365,19 @@
       <p class="dialog-copy">Share the link so friends can add their own times, or add a placeholder for someone you’ll chase later.</p>
       <label class="field-label" for="inviteLink">Invite link</label>
       <div class="copy-row"><input class="text-input" id="inviteLink" readonly /><button class="outline-button" id="copyInviteLink" type="button">Copy</button></div>
-      <div class="people-tabs">
+      <div class="invite-controls member-only" id="inviteControls" hidden>
+        <p class="form-hint" id="inviteStatus"></p>
+        <div class="invite-actions">
+          <button class="outline-button" type="button" id="revokeInvite">Turn off link</button>
+          <button class="outline-button" type="button" id="renewInvite">New link</button>
+        </div>
+      </div>
+      <div class="people-tabs member-only">
         <button class="people-tab active" data-people-tab="friend">Add a person</button>
         <button class="people-tab" data-people-tab="friends" id="friendsTab">Friends</button>
         <button class="people-tab" data-people-tab="group">Rename group</button>
       </div>
-      <form id="friendForm" class="people-form">
+      <form id="friendForm" class="people-form member-only">
         <label class="field-label" for="friendName">Their name</label>
         <input class="text-input" id="friendName" placeholder="Jordan Lee" required maxlength="60" />
         <label class="field-label" for="friendEmail">Email (optional)</label>
@@ -367,7 +385,7 @@
         <p class="form-hint">They’ll show as waiting for times until they open the link and add their own.</p>
         <button class="primary-button full" type="submit">Add to this group</button>
       </form>
-      <form id="groupForm" class="people-form" hidden>
+      <form id="groupForm" class="people-form member-only" hidden>
         <label class="field-label" for="groupName">Group name</label>
         <input class="text-input" id="groupName" placeholder="Weekend crew" required maxlength="60" />
         <p class="form-hint">This is the name everyone sees at the top of the planner.</p>
@@ -469,7 +487,7 @@
         </div>
         <button class="outline-button" type="button" id="installButton" hidden>Install</button>
       </div>
-      <form id="settingsForm">
+      <form id="settingsForm" class="member-only">
         <label class="field-label" for="settingWorkspaceName">Group name</label>
         <input class="text-input" id="settingWorkspaceName" maxlength="60" required />
         <label class="field-label" for="settingGroupKind">Group type</label>

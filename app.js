@@ -76,6 +76,7 @@ import { APPEARANCES, THEME_COLORS, normalizeAppearance, resolveTheme } from "./
 import { initBookingOwner } from "./booking-owner.js";
 import { installMode, isStandalone, registerServiceWorker } from "./lib/pwa.js";
 import { REPEATS, applyRsvp, nextOccurrence, repeatLabel, rsvpAnswers, rsvpSummary, toggleTimeVote } from "./lib/hangout.js";
+import { guestUpdateFrom, isInviteCode, newGuestToken } from "./lib/guests.js";
 
 // Browser-safe credentials: the publishable (anon) key is designed to ship in
 // client code. Row level security in supabase/schema.sql is what protects data.
@@ -107,6 +108,8 @@ const STORAGE = {
   checklistDismissed: (slug) => `gatherly-checklist-dismissed:${slug}`,
   appearance: "gatherly-appearance",
   mineDetails: "gatherly-mine-details",
+  // A guest's pass for one group: { invite, token } (see lib/guests.js).
+  guest: (slug) => `gatherly-guest:${slug}`,
 };
 
 const supabaseClient = AUTH_CONFIG.configured && window.supabase
@@ -145,7 +148,33 @@ const session = {
   rev: null,
   persisted: false,
   offline: true,
+  // Set when this browser is in the group as a guest: { memberId }.
+  guest: null,
+  // Which card covers the planner when it can't open: "signin", "join", "revoked" or "locked".
+  gate: "signin",
+  gateNote: "",
 };
+
+/* Guest passes: the invite code from the link, and this browser's own random token. */
+
+function guestPass() {
+  const pass = readJson(STORAGE.guest(slug), null);
+  return pass && isInviteCode(pass.invite) ? pass : null;
+}
+
+function saveGuestPass(pass) {
+  if (pass) writeJson(STORAGE.guest(slug), pass);
+  else window.localStorage.removeItem(STORAGE.guest(slug));
+}
+
+{
+  // An invite link carries ?i=<code>; keep it so a reload (or the plain group link) still works.
+  const fromLink = new URLSearchParams(window.location.search).get("i");
+  if (isInviteCode(fromLink)) {
+    const pass = guestPass();
+    if (pass?.invite !== fromLink) saveGuestPass({ ...(pass || {}), invite: fromLink });
+  }
+}
 
 const ui = {
   weekOffset: 0,
@@ -260,32 +289,89 @@ async function accessToken() {
   return data.session?.access_token || null;
 }
 
-/** Groups need an account; the demo doesn't. Shown instead of the planner. */
+/** "book-club-7fq2x" reads as "Book club"; the random ending is only there to keep links unique. */
+const friendlyGroupName = () => placeholderName(session.slug.replace(/-(?=[a-z0-9]*\d)[a-z0-9]{5}$/, ""));
+
+/**
+ * Shown instead of the planner when the group can't open yet: sign in, join
+ * with just a name (an invite link), or the link was turned off.
+ */
 function renderSignInGate() {
   const gated = session.needsSignIn === true;
   $("signInGate").hidden = !gated;
   document.body.classList.toggle("gated", gated);
-  // "book-club-7fq2x" reads as "Book club"; the random ending is only there to keep links unique.
-  if (gated) $("gateTitle").textContent = `Sign in to join ${placeholderName(session.slug.replace(/-(?=[a-z0-9]*\d)[a-z0-9]{5}$/, ""))}`;
+  if (!gated) return;
+  const gate = session.gate || "signin";
+  const joining = gate === "join";
+  $("signInGate").dataset.gate = gate;
+  $("guestJoinForm").hidden = !joining;
+  $("gateSignIn").textContent = joining ? "Sign in to save and connect your calendar" : "Sign in with Google";
+  $("gateSignIn").classList.toggle("primary-button", !joining);
+  $("gateSignIn").classList.toggle("outline-button", joining);
+  $("gateEyebrow").textContent = gate === "revoked" ? "LINK TURNED OFF" : gate === "locked" ? "MEMBERS ONLY" : "YOU'RE INVITED";
+  const name = session.joinName || friendlyGroupName();
+  $("gateTitle").textContent =
+    gate === "join" ? `Join ${name}`
+      : gate === "revoked" ? "This invite link doesn't work any more"
+        : gate === "locked" ? `${name} is for signed-in members`
+          : `Sign in to join ${friendlyGroupName()}`;
+  $("gateCopy").textContent =
+    gate === "join" ? "Just add your name to mark when you're free, vote on a time and RSVP. No account needed."
+      : gate === "revoked" ? "Ask whoever sent it for a new link. Already in the group? Sign in."
+        : gate === "locked" ? "The group's owner only lets signed-in people in. Sign in with Google to join."
+          : "Groups share when people are free, so only signed-in people can open them. It's free and takes one tap with Google.";
+  $("gateNote").textContent = session.gateNote || (joining ? "Guests see when people are busy or free, never what they're doing." : "");
+  if (joining && !$("guestName").value) $("guestName").value = profile.name || "";
+}
+
+/** Headers that prove who is asking: an account, or a guest pass from an invite link. */
+async function workspaceHeaders(token) {
+  if (token) return { Authorization: `Bearer ${token}` };
+  const pass = guestPass();
+  if (!pass) return {};
+  return { "X-Waddle-Invite": pass.invite, ...(pass.token ? { "X-Waddle-Guest": pass.token } : {}) };
+}
+
+/** Puts a closed gate up: nothing about the group is shown or saved. */
+function closeGate(gate, note = "") {
+  session.needsSignIn = true;
+  session.guest = null;
+  session.gate = gate;
+  session.gateNote = note;
+  renderChrome();
+  renderSignInGate();
 }
 
 async function loadWorkspace() {
   const cached = readJson(STORAGE.cache(session.slug), null);
   try {
     const token = await accessToken();
+    const pass = token ? null : guestPass();
     const response = await fetch(`/api/workspace?slug=${encodeURIComponent(session.slug)}`, {
-      headers: { Accept: "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      headers: { Accept: "application/json", ...(await workspaceHeaders(token)) },
     });
-    const gated = response.status === 401;
-    session.needsSignIn = gated;
-    renderSignInGate();
-    if (gated) {
+    if (response.status === 401 || response.status === 403) {
       // Nothing about the group comes back, and nothing is saved until sign-in.
+      const answer = await response.json().catch(() => ({}));
       ui.workspaceLoaded = true;
+      closeGate(answer.inviteRevoked ? "revoked" : answer.locked ? "locked" : "signin");
       return;
     }
     if (!response.ok) throw new Error(String(response.status));
     const payload = await response.json();
+    if (payload.join) {
+      // A working invite link: they can come in with just a name.
+      session.joinName = payload.join.name;
+      const removed = Boolean(pass?.token);
+      if (removed) saveGuestPass({ invite: pass.invite });
+      ui.workspaceLoaded = true;
+      closeGate("join", removed ? "You're no longer in this group. You can join again with this link." : "");
+      return;
+    }
+    session.needsSignIn = false;
+    session.gate = "signin";
+    session.guest = payload.guest ? { memberId: payload.guest.memberId } : null;
+    renderSignInGate();
     session.rev = payload.rev || null;
     session.persisted = payload.persisted === true;
     session.offline = false;
@@ -296,6 +382,7 @@ async function loadWorkspace() {
       // Nothing saved here yet, so start from the sample workspace.
       session.state = normalizeWorkspaceState(payload.state);
     }
+    if (session.guest) rememberMemberId(session.guest.memberId);
   } catch {
     session.offline = true;
     session.persisted = false;
@@ -304,6 +391,117 @@ async function loadWorkspace() {
   await ensureMembership();
   render();
   if (!session.persisted) noteDemoMode();
+}
+
+/** Guests change the group through one server action, never by saving the whole thing. */
+async function guestPost(body) {
+  const pass = guestPass();
+  if (!pass?.invite) return { response: null, payload: {} };
+  try {
+    const response = await fetch(`/api/workspace?slug=${encodeURIComponent(session.slug)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ ...body, invite: pass.invite, token: pass.token }),
+    });
+    return { response, payload: await response.json().catch(() => ({})) };
+  } catch {
+    return { response: null, payload: {} };
+  }
+}
+
+/** Takes a guest answer that closes the door (link off, locked, removed). Returns true if it did. */
+function guestLockedOut(response, payload) {
+  if (!response || response.status !== 403) return false;
+  if (payload.guestUnknown) {
+    const pass = guestPass();
+    saveGuestPass(pass ? { invite: pass.invite } : null);
+    closeGate("join", "You're no longer in this group. You can join again with this link.");
+    return true;
+  }
+  closeGate(payload.locked ? "locked" : "revoked");
+  return true;
+}
+
+async function joinAsGuest(name) {
+  const pass = guestPass();
+  if (!pass) return;
+  const token = pass.token || newGuestToken();
+  saveGuestPass({ ...pass, token });
+  const { response, payload } = await guestPost({ action: "guest-join", name, memberId });
+  if (guestLockedOut(response, payload)) return;
+  if (!response?.ok || !payload.guest) {
+    showToast(payload.error || "Couldn't join right now. Try again in a moment.");
+    return;
+  }
+  profile = { ...profile, name };
+  writeJson(STORAGE.profile, profile);
+  session.needsSignIn = false;
+  session.gate = "signin";
+  session.gateNote = "";
+  session.guest = { memberId: payload.guest.memberId };
+  session.state = normalizeWorkspaceState(payload.state);
+  session.rev = payload.rev || null;
+  session.persisted = true;
+  session.offline = false;
+  writeJson(STORAGE.cache(session.slug), session.state);
+  renderSignInGate();
+  rememberMemberId(payload.guest.memberId);
+  render();
+  recordVisit();
+  showToast(`You're in as ${name}. Mark when you're busy, then vote on a time.`);
+}
+
+/**
+ * A guest's edit: applied on screen at once, then sent as their own row and
+ * votes (lib/guests.js guestUpdateFrom). The server keeps only those parts and
+ * answers with the group as a guest may see it.
+ */
+async function guestSave(apply) {
+  const before = session.state;
+  const next = nextStateFrom(before, apply);
+  if (!next) {
+    showToast(TOO_LARGE_MESSAGE);
+    return false;
+  }
+  session.state = next;
+  ui.saving = true;
+  render();
+  const { response, payload } = await guestPost({ action: "guest-update", ...guestUpdateFrom(next, memberId) });
+  ui.saving = false;
+  if (guestLockedOut(response, payload)) return false;
+  if (!response?.ok) {
+    session.state = before;
+    render();
+    showToast(payload.error || "Couldn't save that. Check your connection and try again.");
+    return false;
+  }
+  session.state = normalizeWorkspaceState(payload.state);
+  session.rev = payload.rev || null;
+  writeJson(STORAGE.cache(session.slug), session.state);
+  render();
+  return true;
+}
+
+/** Owner actions on the invite link and guests. */
+async function workspaceAction(body) {
+  const token = await accessToken();
+  try {
+    const response = await fetch(`/api/workspace?slug=${encodeURIComponent(session.slug)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (response.ok && payload.state) {
+      session.state = normalizeWorkspaceState(payload.state);
+      session.rev = payload.rev || session.rev;
+      writeJson(STORAGE.cache(session.slug), session.state);
+      render();
+    }
+    return { ok: response.ok, payload };
+  } catch {
+    return { ok: false, payload: { error: "No connection to your group right now." } };
+  }
 }
 
 /**
@@ -336,6 +534,7 @@ function nextStateFrom(base, apply, note) {
 async function applyAndSave(apply, { note } = {}) {
   // Behind the sign-in gate nothing is saved (background syncs included).
   if (session.needsSignIn) return false;
+  if (session.guest) return guestSave(apply);
   let before = session.state;
   const next = nextStateFrom(before, apply, note);
   if (!next) {
@@ -442,6 +641,8 @@ async function applyAndSave(apply, { note } = {}) {
  * else's edit still lands on the right row. See lib/membership.js.
  */
 async function ensureMembership() {
+  // A guest's row is made by the server when they join.
+  if (session.guest || session.needsSignIn) return;
   const wantedName = profile.name || displayName();
   const plan = resolveMembership({ members: session.state.members, localMemberId: memberId, user: ui.user });
   const current = session.state.members.find((member) => member.id === plan.id);
@@ -533,6 +734,10 @@ function groupKind() {
 }
 
 function renderChrome() {
+  const guest = Boolean(session.guest);
+  document.body.classList.toggle("guest-mode", guest);
+  $("guestBanner").hidden = !guest;
+  if (guest) $("guestBannerName").textContent = me()?.name || displayName();
   $("workspaceName").textContent = session.state.name;
   document.title = `${session.state.name} — Waddle`;
   // A rename (here or by someone else) shows in Your groups straight away.
@@ -928,9 +1133,9 @@ function renderPeople() {
           : "Needs update";
     const statusClass = status === "✓ All set" ? "person-status" : "person-status muted";
     return `<article class="person-card${isYou ? " is-you" : ""}${member.pending ? " pending" : ""}">
-      ${isYou ? "" : `<button class="card-remove" data-remove-member="${escapeAttribute(member.id)}" aria-label="Remove ${escapeAttribute(member.name)}">${svgIcon("x")}</button>`}
+      ${isYou ? "" : `<button class="card-remove member-only" data-remove-member="${escapeAttribute(member.id)}" aria-label="Remove ${escapeAttribute(member.name)}">${svgIcon("x")}</button>`}
       <div class="person-top"><div class="avatar ${member.palette}">${escapeHtml(member.initials)}</div><span class="presence${sharedThisWeek ? "" : " away"}"></span></div>
-      <strong>${escapeHtml(member.name)}${isYou ? ' <span class="person-badge">YOU</span>' : ""}</strong>
+      <strong>${escapeHtml(member.name)}${isYou ? ' <span class="person-badge">YOU</span>' : member.guest ? ' <span class="person-badge guest">GUEST</span>' : ""}</strong>
       <small>Updated ${escapeHtml(formatRelative(member.updatedAt))}</small>
       <span class="${statusClass}">${escapeHtml(status)}</span>
     </article>`;
@@ -944,7 +1149,9 @@ function renderIdeas() {
   const grid = $("ideaGrid");
   const ideas = rankIdeas(session.state.ideas);
   if (!ideas.length) {
-    grid.innerHTML = '<p class="empty-note">No ideas yet. Add the first one — anything from a walk to a weekend away.</p>';
+    grid.innerHTML = session.guest
+      ? '<p class="empty-note">No ideas yet.</p>'
+      : '<p class="empty-note">No ideas yet. Add the first one — anything from a walk to a weekend away.</p>';
     return;
   }
   const top = voteCount(ideas[0]);
@@ -960,7 +1167,7 @@ function renderIdeas() {
         : `<div class="idea-image ${style.key}"><span>${style.emoji}</span>`;
       return `<article class="idea-card${count && count === top ? " selected-idea" : ""}">
         ${tile}
-          <button class="idea-edit" data-edit-idea="${escapeAttribute(idea.id)}" aria-label="Edit ${escapeAttribute(idea.title)}">${svgIcon("pencil")}</button>
+          <button class="idea-edit member-only" data-edit-idea="${escapeAttribute(idea.id)}" aria-label="Edit ${escapeAttribute(idea.title)}">${svgIcon("pencil")}</button>
           <button class="heart${voted ? " voted" : ""}" data-vote-idea="${escapeAttribute(idea.id)}" aria-pressed="${voted}" aria-label="${voted ? "Remove your vote for" : "Vote for"} ${escapeAttribute(idea.title)}">${svgIcon(voted ? "heart-fill" : "heart")}</button>
         </div>
         <div class="idea-content">
@@ -968,7 +1175,7 @@ function renderIdeas() {
           <h3>${escapeHtml(idea.title)}</h3>
           <p>${escapeHtml(idea.description)}</p>
           <div class="idea-meta"><span>⌖ ${escapeHtml(idea.location || "Anywhere")}</span><span>${svgIcon("heart")} ${count} vote${count === 1 ? "" : "s"}</span></div>
-          <button class="text-button plan-idea" type="button" data-plan-idea="${escapeAttribute(idea.id)}">Plan this ${svgIcon("arrow")}</button>
+          <button class="text-button plan-idea member-only" type="button" data-plan-idea="${escapeAttribute(idea.id)}">Plan this ${svgIcon("arrow")}</button>
         </div>
       </article>`;
     })
@@ -1001,7 +1208,7 @@ function renderPlan() {
           const names = option.voters.map((id) => session.state.members.find((member) => member.id === id)?.name).filter(Boolean);
           return `<span class="time-option${mine ? " voted" : ""}">` +
             `<button type="button" class="time-vote" data-vote-time="${option.start.toISOString()}" aria-pressed="${mine}" title="${escapeAttribute(names.length ? `Votes: ${names.join(", ")}` : "No votes yet")}" aria-label="${mine ? "Remove your vote for" : "Vote for"} ${escapeAttribute(formatWindow(option))}">${svgIcon(mine ? "heart-fill" : "heart")} ${option.voters.length}</button>` +
-            `<button type="button" data-window="${option.start.getTime()}" data-window-end="${option.end.getTime()}" title="Pick this time">${escapeHtml(formatWindow(option))}</button></span>`;
+            `<button type="button" data-window="${option.start.getTime()}" data-window-end="${option.end.getTime()}"${session.guest ? ' disabled title="The group picks the time; vote with the heart"' : ' title="Pick this time"'}>${escapeHtml(formatWindow(option))}</button></span>`;
         })
         .join("")}`
     : '<span>No shared window in that range yet — add more times or widen the search.</span>';
@@ -1231,7 +1438,8 @@ function checklistStepMarkup(step, index) {
 function renderChecklist() {
   const card = $("checklistCard");
   const steps = checklistSteps({ state: session.state, member: me(), sourcesCount: calendarSources.length, slug: session.slug });
-  const visible = ui.workspaceLoaded && !checklistDismissed && showChecklist(session.slug, steps);
+  // Setting the group up is the organiser's job, not a guest's.
+  const visible = ui.workspaceLoaded && !session.guest && !checklistDismissed && showChecklist(session.slug, steps);
   card.hidden = !visible;
   if (!visible) return;
 
@@ -1992,9 +2200,17 @@ $("clearMyWeek").addEventListener("click", async () => {
 
 /* Sharing */
 
+/** The link to share: the group, plus its invite code when there is a live one (anyone with it can join as a guest). */
+function inviteCode() {
+  if (session.guest) return guestPass()?.invite || null;
+  const invite = session.state.invite;
+  return invite && !invite.revoked ? invite.code : null;
+}
+
 function inviteUrl() {
   const url = new URL(window.location.href);
-  url.search = session.slug === "weekend-crew" ? "" : `?w=${encodeURIComponent(session.slug)}`;
+  const code = inviteCode();
+  url.search = session.slug === "weekend-crew" ? "" : `?w=${encodeURIComponent(session.slug)}${code ? `&i=${encodeURIComponent(code)}` : ""}`;
   url.hash = "";
   return url.toString();
 }
@@ -2034,7 +2250,9 @@ $("inviteButton").addEventListener("click", () => {
   $("inviteLink").value = inviteUrl();
   renderSavedPeople();
   openDialog(dialogs.people);
-  shareInvite("Anyone who signs in with this link can join and add their times.");
+  shareInvite(inviteCode()
+    ? "Anyone with this link can join with just their name and add their times."
+    : "Anyone who signs in with this link can join and add their times.");
 });
 
 $("shareButton").addEventListener("click", () => shareInvite("Availability view shared."));
@@ -2109,7 +2327,17 @@ $("savePrivacy").addEventListener("click", async () => {
 
 /* Calendar links */
 
+/** Guests are asked to sign in before anything that needs an account, like a calendar. */
+function openSignInUpsell() {
+  $("accountTitle").textContent = "Sign in to save and connect your calendar.";
+  $("accountCopy").textContent = "You're in as a guest. Sign in and your times follow you to every device, your calendar can fill them in for you, and you can get reminders.";
+  openDialog(dialogs.account);
+}
+
+$("guestSignIn").addEventListener("click", openSignInUpsell);
+
 $("calendarButton").addEventListener("click", () => {
+  if (session.guest) return openSignInUpsell();
   renderSources();
   renderGoogleState();
   openDialog(dialogs.calendar);
@@ -2190,6 +2418,7 @@ $("calendarSources").addEventListener("click", (event) => {
 });
 
 $("syncCalendarButton").addEventListener("click", async () => {
+  if (session.guest) return openSignInUpsell();
   const icsSources = calendarSources.filter((source) => source.type === "ics");
   const hasGoogle = googleConnected();
   if (!icsSources.length && !hasGoogle) {
@@ -2419,6 +2648,16 @@ $("phoneCode").addEventListener("keydown", (event) => {
   verifyPhoneCode();
 });
 
+$("guestJoinForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const name = $("guestName").value.replace(/\s+/g, " ").trim();
+  if (!name) return;
+  const button = $("guestJoinForm").querySelector("button[type=submit]");
+  button.disabled = true;
+  await joinAsGuest(name);
+  button.disabled = false;
+});
+
 $("signOutButton").addEventListener("click", async () => {
   if (!supabaseClient) return;
   await supabaseClient.auth.signOut();
@@ -2592,14 +2831,42 @@ function renderSavedPeople() {
   $("groupName").value = session.state.name;
   $("savedPeople").innerHTML = session.state.members
     .map(
-      (member) => `<div class="saved-person"><span class="saved-person-icon">•</span><span>${escapeHtml(member.name)}</span><small>${member.id === memberId ? "You" : member.pending ? "Invited" : "Sharing"}</small>${
-        member.id === memberId ? "" : `<button type="button" data-remove-member="${escapeAttribute(member.id)}" aria-label="Remove ${escapeAttribute(member.name)}">${svgIcon("x")}</button>`
+      (member) => `<div class="saved-person${member.guest ? " is-guest" : ""}"><span class="saved-person-icon">•</span><span>${escapeHtml(member.name)}</span><small>${member.id === memberId ? (member.guest ? "You (guest)" : "You") : member.guest ? "Guest" : member.pending ? "Invited" : "Sharing"}</small>${
+        member.id === memberId ? "" : `<button type="button" class="member-only" data-remove-member="${escapeAttribute(member.id)}" aria-label="Remove ${escapeAttribute(member.name)}">${svgIcon("x")}</button>`
       }</div>`
     )
     .join("");
+  renderInviteControls();
   renderClaimPrompt();
   renderFriends();
 }
+
+/** Turn the invite link off, or make a new one (owners; the server checks). */
+function renderInviteControls() {
+  const invite = session.state.invite;
+  const box = $("inviteControls");
+  box.hidden = !invite || Boolean(session.guest) || !ui.user;
+  if (box.hidden) return;
+  const guests = session.state.members.filter((member) => member.guest).length;
+  $("inviteStatus").textContent = invite.revoked
+    ? "The link is off: nobody new can join with it, and guests can't open the group."
+    : `Anyone with this link can join as a guest with just a name${guests ? ` (${guests} so far)` : ""}. Guests see busy/free and the plan, never event names or places.`;
+  $("revokeInvite").hidden = invite.revoked;
+  $("renewInvite").textContent = invite.revoked ? "Make a new link" : "New link";
+}
+
+$("revokeInvite").addEventListener("click", async () => {
+  const { ok, payload } = await workspaceAction({ action: "invite-revoke" });
+  renderSavedPeople();
+  showToast(ok ? "Invite link turned off. Guests can't open the group any more." : payload.error || "Couldn't turn the link off.");
+});
+
+$("renewInvite").addEventListener("click", async () => {
+  const { ok, payload } = await workspaceAction({ action: "invite-renew" });
+  renderSavedPeople();
+  if (ok) await shareInvite("New invite link made; the old one stopped working.");
+  else showToast(payload.error || "Couldn't make a new link.");
+});
 
 /**
  * Somebody who opened an invite link without an account can say which pending
@@ -2926,6 +3193,13 @@ $("groupForm").addEventListener("submit", async (event) => {
 async function removeMember(id) {
   const member = session.state.members.find((entry) => entry.id === id);
   if (!member || id === memberId) return;
+  if (member.guest) {
+    // The server removes a guest, their pass and their votes together.
+    const { ok, payload } = await workspaceAction({ action: "guest-remove", memberId: id });
+    renderSavedPeople();
+    showToast(ok ? `${member.name} removed, with their votes.` : payload.error || "Couldn't remove them.");
+    return;
+  }
   await mutate(
     (draft) => {
       draft.members = draft.members.filter((entry) => entry.id !== id);
@@ -3264,7 +3538,7 @@ $("exportWorkspace").addEventListener("click", () => {
 
 $("resetLocal").addEventListener("click", () => {
   // The calendar links go, and so do the events imported from them (names included).
-  for (const key of [STORAGE.cache(session.slug), STORAGE.member, STORAGE.profile, STORAGE.sources, STORAGE.myEvents, STORAGE.seen(session.slug)]) {
+  for (const key of [STORAGE.cache(session.slug), STORAGE.member, STORAGE.profile, STORAGE.sources, STORAGE.myEvents, STORAGE.seen(session.slug), STORAGE.guest(session.slug)]) {
     window.localStorage.removeItem(key);
   }
   clearGoogleToken();
@@ -3617,6 +3891,7 @@ $("groupCalThisWeek").addEventListener("click", () => {
 
 $("myAgenda").addEventListener("click", async (event) => {
   if (event.target.closest("[data-open-calendars]")) {
+    if (session.guest) return openSignInUpsell();
     openDialog(dialogs.calendar);
     return;
   }
@@ -3779,7 +4054,9 @@ $("saveSharing").addEventListener("click", async () => {
 /** Puts your always-busy hours (times only, never labels) on your row in this group. */
 async function syncBlockedToGroup() {
   const mine = me();
-  if (!mine || session.needsSignIn) return;
+  // A guest can only send their own painted hours (lib/guests.js), so their
+  // always-busy rules stay on their device.
+  if (!mine || session.needsSignIn || session.guest) return;
   const wanted = rulesForGroup(sharing.blocked);
   if (JSON.stringify(wanted) === JSON.stringify(mine.blocked || [])) return;
   await mutate((draft) => {
@@ -4196,8 +4473,8 @@ async function start() {
       friends.loaded = false;
       if (authSession?.user) {
         await loadRemoteProfile(authSession.user);
-        // Coming through the sign-in gate: load the group now (that joins it too).
-        if (session.needsSignIn) {
+        // Coming through the sign-in gate, or signing in as a guest: load the group now (that joins it too).
+        if (session.needsSignIn || session.guest) {
           await loadWorkspace();
           if (!session.needsSignIn) recordVisit();
         } else await ensureMembership();

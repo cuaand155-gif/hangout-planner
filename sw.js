@@ -23,6 +23,7 @@ const SHELL = [
   "/lib/friends.js",
   "/lib/hangout.js",
   "/lib/groups.js",
+  "/lib/guests.js",
   "/lib/membership.js",
   "/lib/palettes.js",
   "/lib/phone.js",
