@@ -7,7 +7,7 @@ Waddle is a no-build vanilla-JS web app (`index.html` + `app.js`, public booking
 
 ## Prerequisites
 
-Node 22 and Playwright with Chromium are already in this container (`/opt/node22/lib/node_modules/playwright`, browsers in `/opt/pw-browsers`). Don't run `playwright install`. There are no npm dependencies to install.
+Node 22 and Playwright with Chromium are already in this container (`/opt/node22/lib/node_modules/playwright`, browsers in `/opt/pw-browsers`). Don't run `playwright install`. The server has npm dependencies (`@vercel/og` for link-preview cards): run `npm install` once in the repo if `node_modules` is missing. The browser code has none.
 
 ## Start the dev server
 

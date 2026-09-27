@@ -4,7 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f4eee6" />
-    <meta name="description" content="Waddle finds the time everyone is free, then helps your group pick something worth doing." />
+    <meta name="description" content="Plan hangouts without sharing your whole calendar. Waddle shows when people are busy or free, never what they're doing." />
+    <!-- preview: /g/ and /p/ links replace this block with their own (api/page.js) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Waddle" />
+    <meta property="og:title" content="Waddle · find a time that works for everyone" />
+    <meta property="og:description" content="Plan hangouts without sharing your whole calendar. Waddle shows when people are busy or free, never what they're doing." />
+    <meta property="og:image" content="https://hangout-planner-omega.vercel.app/icons/og-card.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <!-- /preview -->
     <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="/icons/icon-32.png" sizes="32x32" type="image/png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
@@ -17,7 +25,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:ital,opsz,wght@0,9..144,500..700;1,9..144,500..700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="/styles.css" />
     <script>!function(d,a,p){try{p=localStorage.getItem("gatherly-palette");a=localStorage.getItem("gatherly-appearance")}catch(e){}if(p)d.dataset.palette=p;a=a=="dark"||a!="light"&&matchMedia("(prefers-color-scheme: dark)").matches;d.dataset.theme=a?"dark":"light";document.querySelector("meta[name=theme-color]").content=a?"#16120f":"#f4eee6"}(document.documentElement)</script>
   </head>
   <body>
@@ -131,6 +139,7 @@
             <div class="section-heading compact">
               <div><p class="eyebrow">JUST A THOUGHT</p><h2>Keep a maybe on the calendar</h2><p>Save the idea now and find the best time with your group later.</p></div>
               <div class="heading-actions">
+                <button class="text-button" id="sharePlan"><svg class="icon" aria-hidden="true"><use href="#i-share"/></svg> Share plan</button>
                 <button class="text-button member-only" id="editTentativePlan">Edit plan <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button>
                 <button class="text-button subtle member-only" id="removeTentativePlan">Remove</button>
               </div>
@@ -190,7 +199,7 @@
               </div>
               <div class="header-actions">
                 <button class="outline-button" id="syncCalendarButton"><svg class="icon" aria-hidden="true"><use href="#i-sync"/></svg> Sync calendar</button>
-                <button class="outline-button" id="shareButton"><svg class="icon" aria-hidden="true"><use href="#i-share"/></svg> Share view</button>
+                <button class="outline-button" id="shareButton"><svg class="icon" aria-hidden="true"><use href="#i-share"/></svg> Share group</button>
               </div>
             </div>
             <p class="edit-hint" id="editHint" hidden>Mark the hours you’re busy by clicking or dragging. Anything you leave light is shared with your group as free.</p>
@@ -672,6 +681,6 @@
     </dialog>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script type="module" src="app.js"></script>
+    <script type="module" src="/app.js"></script>
   </body>
 </html>

@@ -2,20 +2,21 @@
 
 Find the time everyone is actually free, then fill it with something worth doing.
 
-Waddle is a small, dependency-free web app. A group shares one link; each
+Waddle is a small web app with no build step. A group shares one link; each
 person marks when they're busy — by hand or by importing a calendar — and the
 planner shows the windows where everybody is free, ranked longest first. The
 group collects ideas, votes on them, and pencils in a plan with its own time
 votes and RSVPs. Around that: friends, a "free now" status, per-friend control
 over what of your calendar they see, and a public booking link.
 
-No build step, no frontend framework, no npm dependencies.
+No build step and no frontend framework. The browser code has no dependencies; the server uses one npm package (`@vercel/og` draws link-preview cards), so run `npm install` once before the tests.
 
 ## Run it locally
 
 ```bash
+npm install          # once: the server's npm package
 npm run dev          # http://localhost:4173
-npm test             # unit and API tests, no dependencies
+npm test             # unit and API tests
 npm run test:e2e     # browser tests in headless Chromium (see below)
 npm test && npm run test:e2e   # everything, before calling a change done
 ```
