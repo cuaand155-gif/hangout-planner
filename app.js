@@ -250,13 +250,18 @@ const noteDemoMode = () => {
 
 const toastElement = $("toast");
 const showToast = (message) => {
-  // An open dialog sits in the browser's top layer, above anything on the page, so the toast goes inside it.
-  const host = document.querySelector("dialog[open]") || document.body;
-  if (toastElement.parentElement !== host) host.append(toastElement);
+  // The toast is a popover: showing it again puts it in the top layer above any open dialog.
+  if (toastElement.showPopover) {
+    if (toastElement.matches(":popover-open")) toastElement.hidePopover();
+    toastElement.showPopover();
+  }
   toastElement.textContent = message;
   toastElement.classList.add("show");
   window.clearTimeout(showToast.timer);
-  showToast.timer = window.setTimeout(() => toastElement.classList.remove("show"), 3200);
+  showToast.timer = window.setTimeout(() => {
+    toastElement.classList.remove("show");
+    showToast.timer = window.setTimeout(() => toastElement.matches?.(":popover-open") && toastElement.hidePopover(), 300);
+  }, 3200);
 };
 
 /* ------------------------------------------------------ week + helpers */
@@ -2554,6 +2559,7 @@ async function updateShareSchedule(shared) {
 
 for (const button of [$("accountButton"), $("topAccountButton")]) {
   button.addEventListener("click", () => {
+    setMenuOpen(false);
     $("profileDisplayName").value = profile.name || displayName();
     previewProfilePhoto(profile.photo);
     openDialog(dialogs.profile);
@@ -4689,7 +4695,8 @@ function setMenuOpen(open) {
 $("mobileMenu").addEventListener("click", () => setMenuOpen(!$("sidebar").classList.contains("open")));
 $("menuBackdrop").addEventListener("click", () => setMenuOpen(false));
 document.addEventListener("keydown", (event) => {
-  if (event.key !== "Escape" || !$("sidebar").classList.contains("open")) return;
+  // An open dialog handles its own Escape; the drawer waits for the next one.
+  if (event.key !== "Escape" || document.querySelector("dialog[open]") || !$("sidebar").classList.contains("open")) return;
   setMenuOpen(false);
   $("mobileMenu").focus();
 });

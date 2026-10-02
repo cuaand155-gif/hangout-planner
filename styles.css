@@ -652,3 +652,4 @@ section.free-now::-webkit-scrollbar{display:none}
 .text-input::placeholder{color:var(--faint,#b6ada6)}
 @media(max-width:620px){.tentative-card{flex-wrap:wrap;position:relative}.tentative-details{flex:1 1 calc(100% - 47px);min-width:0}.tentative-badge{position:absolute;top:14px;right:14px}.tentative-details h3{padding-right:86px}}
 #nudgeVoters:disabled{color:var(--muted);cursor:default}
+.toast[popover]{inset:auto auto 25px 50%;margin:0;border:0;overflow:visible;width:max-content;max-width:calc(100% - 32px)}
