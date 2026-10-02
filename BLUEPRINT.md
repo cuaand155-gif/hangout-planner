@@ -2,7 +2,7 @@
 
 The complete picture of what Waddle is supposed to do, where each piece lives, what proves it works, and what's left. Use it as the checklist before calling Waddle "done", and update it whenever a feature is added or changed. The product rules for what each view may show are in [CLAUDE.md](CLAUDE.md) and win over anything here.
 
-Last checked: 2026-09-27, with notifications (bell, push, nudges, reminders): 279 unit/API tests and 66 browser tests, all passing; `rls-server-test.sql` 10/10 on the live project. Database rules re-checked on the live project 2026-10-01 after the phone-number schema: `rls-test.sql` 22/22 and `rls-shares-test.sql` 24/24.
+Last checked: 2026-10-02, with the suggested best time and plan comments: 284 unit/API tests and 69 browser tests, all passing; `rls-server-test.sql` 10/10 on the live project. Database rules re-checked on the live project 2026-10-01 after the phone-number schema: `rls-test.sql` 22/22 and `rls-shares-test.sql` 24/24.
 
 ## 1. What Waddle is
 
@@ -98,6 +98,8 @@ Status key: ✅ proven by an automated browser test · 🧪 proven by unit/API t
 | Feature | Where | Proven by | Status |
 |---|---|---|---|
 | Propose a plan, vote on times, pick one, RSVP | Tentative plan, `lib/hangout.js` | e2e "propose a plan…" | ✅ |
+| Best time: one suggested time from the votes and who's free, picked with one tap (never picked by itself) | `#bestTime`, `suggestBestTime`, `whoIsFree` | e2e "the best time follows the votes, and one tap picks it"; `hangout`, `planner` tests | ✅ |
+| Talk the plan over: comments under the plan; members and guests add theirs and delete only their own | `#planChat`, `plan.comments`, `applyGuestUpdate` | e2e "comments: send with Enter…", "a guest talks the plan over…"; `hangout`, `guests` tests | ✅ |
 | Repeating plans (weekly etc.) | `#planRepeat` | e2e "repeating plans roll on…"; `hangout` tests | ✅ |
 | Add to calendar (.ics file or Google link) | `lib/calendar-export.js` | e2e "add to calendar…" (the .ics file and the Google link's contents; Google itself is never opened); `calendar-export` tests | ✅ |
 | Activity ideas with photos | Ideas section | e2e "an idea with a photo…"; `idea-photos` tests | ✅ |
@@ -157,11 +159,11 @@ Done when: all rows are ✅ except the 🙋 ones, and both test commands pass. D
 5. **Booking emails** (optional): buy a domain, create a free Resend account, then add `RESEND_API_KEY` and `BOOKING_EMAIL_FROM` in Vercel.
 6. ~~**Tidy-up**~~ Done 2026-09-26: the Google key file is in Drive's trash (the keys live in Vercel).
 
-### Phase C: ideas for later (not started, need a yes)
+### Phase C: ideas for later
 
-- Reminders before a plan starts.
-- Suggest a time automatically from everyone's free windows and open votes.
-- A shared plan chat or comments.
+- ~~Reminders before a plan starts.~~ Done 2026-09-27 (notifications).
+- ~~Suggest a time automatically from everyone's free windows and open votes.~~ Done 2026-10-02: "Best time" on the plan card.
+- ~~A shared plan chat or comments.~~ Done 2026-10-02: "Talk it over" under the plan.
 
 ## 5. Release checklist (run before calling any change done)
 

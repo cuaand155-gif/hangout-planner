@@ -2032,6 +2032,27 @@ describe("guests: invite links work without an account", () => {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, "nothing scrolls sideways");
     assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark");
   });
+  browserTest("a guest talks the plan over: their comment reaches the group, and only theirs can be deleted", { db: true }, async ({ page, go }) => {
+    const group = detailedGroup();
+    group.plan.comments = [{ id: "c_alexi", memberId: "m_alexi", text: "I booked a table for 6", at: new Date(Date.now() - 3600e3).toISOString() }];
+    await seedGroup(group);
+    await joinAs(page, go, "Casey");
+    assert.match(await page.locator("#commentList").innerText(), /Alexi[\s\S]*I booked a table for 6/);
+    assert.equal(await page.locator("#commentList [data-delete-comment]").count(), 0, "not theirs to delete");
+    assert.equal(await page.locator("#bestTime").isHidden(), true, "a time is already picked");
+
+    await page.fill("#commentText", "Count me in!");
+    await page.press("#commentText", "Enter");
+    await page.locator("#commentList .comment.mine").waitFor();
+    const id = await guestId();
+    await eventually(async () => (await db.group()).plan.comments?.some((comment) => comment.memberId === id && comment.text === "Count me in!"), "the comment in the database");
+    assert.equal((await db.group()).plan.comments.length, 2);
+
+    await page.locator("#commentList .comment.mine [data-delete-comment]").click();
+    await toastSays(page, /Comment deleted/);
+    await eventually(async () => (await db.group()).plan.comments.length === 1, "the comment gone from the database");
+    assert.equal((await db.group()).plan.comments[0].id, "c_alexi", "Alexi's stays");
+  });
 });
 
 describe("sharing links", () => {
@@ -2231,5 +2252,70 @@ describe("notifications", () => {
     await go(`/?w=${SLUG}`);
     await nudge.waitFor();
     assert.equal(await nudge.isDisabled(), true, "still waiting after a reload");
+  });
+
+});
+
+describe("plans: the best time, and talking it over", () => {
+  const cached = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("gatherly-workspace:weekend-crew")).plan);
+
+  async function proposePlan(page, activity = "Picnic") {
+    await page.locator("#tentativePlanButton").click();
+    await page.fill("#planActivity", activity);
+    await page.locator('#tentativePlanDialog input[name="timing"][value="month"]').check();
+    await page.locator("#tentativePlanForm button[type=submit]").click();
+    await page.locator(".time-option [data-window]").first().waitFor();
+    // The dialog closes once the save lands; until then the page behind it is inert.
+    await page.waitForFunction(() => !document.querySelector("#tentativePlanDialog").open);
+  }
+
+  browserTest("the best time follows the votes, and one tap picks it", {}, async ({ page, go }) => {
+    await go("/?nosw");
+    await proposePlan(page);
+    await page.locator("#bestTime").waitFor();
+    assert.match(await page.locator("#bestTime").innerText(), /BEST TIME[\s\S]*(everyone's free|of \d+ free)/);
+
+    // Vote for the last option shown: votes count most, so it becomes the best time.
+    const options = page.locator(".time-option .time-vote");
+    const voted = await options.last().getAttribute("data-vote-time");
+    await options.last().click();
+    await toastSays(page, /Vote added/);
+    await page.waitForFunction((at) => document.querySelector("[data-pick-best]")?.dataset.pickBest === String(new Date(at).getTime()), voted);
+    assert.match(await page.locator("#bestTime").innerText(), /1 vote/);
+
+    await page.locator("[data-pick-best]").click();
+    await toastSays(page, /Pencilled in/);
+    await page.locator("#calendarAdd").waitFor();
+    assert.equal((await cached(page)).chosen, voted);
+    assert.equal(await page.locator("#bestTime").isHidden(), true, "nothing left to suggest once a time is picked");
+  });
+
+  browserTest("comments: send with Enter, new lines with Shift+Enter, kept when the plan is edited, deleted by their writer", {}, async ({ page, go }) => {
+    await go("/?nosw");
+    await proposePlan(page);
+    await page.fill("#commentText", "Who's bringing the blanket?");
+    await page.press("#commentText", "Enter");
+    await page.locator("#commentList .comment.mine").waitFor();
+    await page.locator("#commentText").type("I can");
+    await page.keyboard.press("Shift+Enter");
+    await page.locator("#commentText").type("and snacks");
+    await page.locator("#commentSend").click();
+    await page.waitForFunction(() => document.querySelectorAll("#commentList .comment").length === 2);
+    assert.deepEqual((await cached(page)).comments.map((comment) => comment.text), ["Who's bringing the blanket?", "I can\nand snacks"]);
+    assert.match(await page.locator("#planChatLabel").innerText(), /Talk it over · 2/i);
+    assert.equal(await page.locator("#commentText").inputValue(), "", "the box empties after sending");
+
+    // Editing the plan keeps the conversation.
+    await page.locator("#editTentativePlan").click();
+    await page.fill("#planActivity", "Picnic in the park");
+    await page.locator("#tentativePlanForm button[type=submit]").click();
+    await page.waitForFunction(() => /Picnic in the park/.test(document.querySelector("#tentativeTitle").textContent));
+    assert.equal((await cached(page)).comments.length, 2);
+
+    await page.locator("#commentList .comment").first().locator("[data-delete-comment]").click();
+    await toastSays(page, /Comment deleted/);
+    assert.deepEqual((await cached(page)).comments.map((comment) => comment.text), ["I can\nand snacks"]);
+    await page.locator("#activityButton").click();
+    assert.match((await texts(page, "#activityList .activity-row strong")).join("\n"), /commented on the plan/);
   });
 });

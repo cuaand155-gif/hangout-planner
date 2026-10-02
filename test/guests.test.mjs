@@ -371,3 +371,19 @@ test("API: without a database there are no invite links", async () => {
   await workspaceHandler({ method: "GET", query: { slug: "book-club-ab2cd" }, headers: {} }, read);
   assert.equal(read.captured.body.state.invite, undefined, "demo mode hands out no code");
 });
+
+test("a guest adds and deletes only their own comments; the server stamps the time", async () => {
+  const { state, memberId } = addGuest(detailedGroup(), { name: "Casey", hash: await hashToken(newGuestToken()) });
+  const withAda = normalizeWorkspaceState({ ...state, plan: { ...state.plan, comments: [{ id: "c_ada", memberId: "m_ada", text: "Booked a table", at: "2026-01-01T10:00:00Z" }] } });
+  const now = new Date("2026-10-05T12:00:00Z");
+  const added = applyGuestUpdate(withAda, memberId, {
+    comments: [{ id: "c_me", text: "  Can't wait ", at: "1999-01-01T00:00:00Z", memberId: "m_ada" }],
+  }, now).state;
+  assert.deepEqual(added.plan.comments.map((c) => [c.id, c.memberId, c.text]), [["c_ada", "m_ada", "Booked a table"], ["c_me", memberId, "Can't wait"]]);
+  assert.equal(added.plan.comments[1].at, now.toISOString(), "not the time the guest claimed");
+  // Sending an empty list deletes theirs, never Ada's.
+  const cleared = applyGuestUpdate(added, memberId, { comments: [] }, now).state;
+  assert.deepEqual(cleared.plan.comments.map((c) => c.id), ["c_ada"]);
+  // Reading back sends exactly the guest's own.
+  assert.deepEqual(guestUpdateFrom(added, memberId).comments, [{ id: "c_me", text: "Can't wait" }]);
+});
