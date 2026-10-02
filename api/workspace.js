@@ -23,7 +23,7 @@
 // Guests never write the whole document. They POST one action, which the
 // server applies to their own row and votes only:
 //   { action: "guest-join",   invite, token, name, memberId? }
-//   { action: "guest-update", invite, token, self?, timeVotes?, rsvp?, ideaVotes? }
+//   { action: "guest-update", invite, token, self?, timeVotes?, rsvp?, ideaVotes?, comments? }
 // Owners (signed in) manage the link and guests:
 //   { action: "invite-revoke" } | { action: "invite-renew" } | { action: "guest-remove", memberId }
 //
@@ -48,7 +48,9 @@ import {
   newInviteCode,
   removeGuest,
 } from "../lib/guests.js";
-import { bearer, config, send, userFromToken } from "./_supabase.js";
+import { accountFromToken, bearer, config, send, userFromToken } from "./_supabase.js";
+import { mergeMemberComments } from "../lib/hangout.js";
+import { normalizeEmail } from "../lib/membership.js";
 import { insertRow, loadRow, saveIfUnchanged, updateRow } from "./_store.js";
 import { countMetric } from "./_metrics.js";
 
@@ -103,6 +105,26 @@ function canManage(state, userId) {
   if (state.ownerId) return state.ownerId === userId;
   return state.members.some((member) => member.userId === userId);
 }
+
+/**
+ * Who may open a locked group (a 1-on-1 is always locked): its owner, its
+ * signed-in members, and someone a pending invite is addressed to by email.
+ * Anyone else gets nothing about the group, not even who is in it.
+ */
+export function mayOpenLocked(state, account) {
+  if (!account?.id) return false;
+  if (state.ownerId === account.id) return true;
+  return state.members.some(
+    (member) => member.userId === account.id || (member.pending && !member.userId && account.email && normalizeEmail(member.email) === account.email)
+  );
+}
+
+async function lockedOut(url, key, request, stored, userId) {
+  if (!stored.settings.locked || stored.ownerId === userId || stored.members.some((member) => member.userId === userId)) return false;
+  return !mayOpenLocked(stored, await accountFromToken(url, key, bearer(request)));
+}
+
+const LOCKED_ANSWER = { error: "This group is only open to its members.", locked: true, member: false };
 
 /* ---------------------------------------------------------------- guests */
 
@@ -264,6 +286,7 @@ async function handle(request, response) {
     if (error) return send(response, 502, { error: "Unable to load workspace", detail: error });
     if (row) {
       const stored = normalizeWorkspaceState(row.state);
+      if (slug !== DEMO_SLUG && (await lockedOut(url, key, request, stored, authenticatedUser))) return send(response, 403, LOCKED_ANSWER);
       // Groups made before invite links get one the first time a member opens them.
       if (!stored.invite && slug !== DEMO_SLUG) {
         const saved = await saveIfUnchanged(url, key, slug, row.updated_at, normalizeWorkspaceState({ ...stored, invite: freshInvite() }));
@@ -311,15 +334,8 @@ async function handle(request, response) {
     if (authenticatedUser === undefined) authenticatedUser = await userFromToken(url, key, bearer(request));
     const userId = authenticatedUser;
     const allowed = userId && (stored.ownerId === userId || stored.members.some((member) => member.userId === userId));
-    if (!allowed) {
-      return send(response, 403, {
-        error: "This workspace is locked to its signed-in members.",
-        slug,
-        state: memberView(stored),
-        rev: current.row.updated_at,
-        persisted: true,
-      });
-    }
+    // Nothing about the group goes back to someone it is locked against.
+    if (!allowed) return send(response, 403, { ...LOCKED_ANSWER, error: "This workspace is locked to its signed-in members." });
   }
 
   const rev = payload?.rev;
@@ -340,12 +356,21 @@ async function handle(request, response) {
     if (authenticatedUser !== stored.ownerId) incoming.ownerId = stored.ownerId;
   }
 
+  // An organization stays busy/free only unless its owner changes the type.
+  if (stored.kind === "organization" && incoming.kind !== "organization") {
+    if (authenticatedUser === undefined) authenticatedUser = await userFromToken(url, key, bearer(request));
+    if (!stored.ownerId || authenticatedUser !== stored.ownerId) incoming.kind = "organization";
+  }
+
   // Who proposed a plan and who picked its time come from the caller's own
   // account, not from what the browser says, and the nudge time is the
-  // server's (see api/notify.js).
+  // server's (see api/notify.js). Comments: everyone else's stay as stored;
+  // the caller can only add or delete their own, and the server stamps the time.
   if (incoming.plan) {
     if (authenticatedUser === undefined) authenticatedUser = await userFromToken(url, key, bearer(request));
     Object.assign(incoming.plan, planAuthorship(stored, incoming, authenticatedUser));
+    const caller = authenticatedUser ? stored.members.find((member) => member.userId === authenticatedUser) || incoming.members.find((member) => member.userId === authenticatedUser) : null;
+    incoming.plan.comments = mergeMemberComments(stored.plan, incoming.plan, caller?.id || null);
   }
 
   // The invite link and the guests' token hashes are the server's: a member's

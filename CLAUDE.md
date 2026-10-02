@@ -32,6 +32,7 @@ Busy/free is the baseline everywhere; names and places are always something the 
 - **Plan comments** ("Talk it over") are shown to everyone in the group, guests included, with the writer's group name. Anyone can delete only their own; a guest's go through the guest actions (the server stamps the time).
 - **Best time** is a suggestion only: someone always taps to pick it. It never commits the group to a time by itself.
 - **Friends** are added by email or phone number and don't need a group. Sign-in is Google or a texted code to your phone.
+- **A locked group** ("Only signed-in members can edit", and every 1-on-1) opens only for its owner, its signed-in members and someone a pending invite is addressed to; anyone else gets nothing about it. Only the owner can turn an organization back into a friends group.
 - **Invite links are a capability.** A group's link carries a secret code (`?i=`). Anyone with it can join as a guest with just a name; the server keeps only a hash of the guest's browser token. The owner can turn the link off or make a new one (either locks every guest out) and remove a guest (their votes and RSVP go too). A locked group ("Only signed-in members can edit") takes no guests. Guest writes go through `POST /api/workspace` actions, rate-limited, never a whole-group save.
 
 ## Working rules

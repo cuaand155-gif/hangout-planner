@@ -328,13 +328,19 @@ function renderSignInGate() {
   $("gateSignIn").classList.toggle("outline-button", joining);
   $("gateEyebrow").textContent = gate === "revoked" ? "LINK TURNED OFF" : gate === "locked" ? "MEMBERS ONLY" : "YOU'RE INVITED";
   const name = session.joinName || friendlyGroupName();
+  // Signed in but not a member of a locked group: signing in again won't help.
+  const outsider = gate === "locked" && Boolean(ui.user);
+  $("gateSignIn").hidden = outsider;
+  $("gatePhone").hidden = outsider;
   $("gateTitle").textContent =
-    gate === "join" ? `Join ${name}`
+    outsider ? `${name} is only open to its members`
+    : gate === "join" ? `Join ${name}`
       : gate === "revoked" ? "This invite link doesn't work any more"
         : gate === "locked" ? `${name} is for signed-in members`
           : `Sign in to join ${friendlyGroupName()}`;
   $("gateCopy").textContent =
-    gate === "join" ? "Just add your name to mark when you're free, vote on a time and RSVP. No account needed."
+    outsider ? "You're signed in, but you're not in this group. Ask someone in it to add you."
+    : gate === "join" ? "Just add your name to mark when you're free, vote on a time and RSVP. No account needed."
       : gate === "revoked" ? "Ask whoever sent it for a new link. Already in the group? Sign in."
         : gate === "locked" ? "The group's owner only lets signed-in people in. Sign in with Google to join."
           : "Groups share when people are free, so only signed-in people can open them. It's free and takes one tap with Google.";
@@ -485,7 +491,7 @@ async function guestSave(apply) {
   session.state = next;
   ui.saving = true;
   render();
-  const { response, payload } = await guestPost({ action: "guest-update", ...guestUpdateFrom(next, memberId) });
+  const { response, payload } = await guestPost({ action: "guest-update", ...guestUpdateFrom(next, memberId, new Date(), before) });
   ui.saving = false;
   if (guestLockedOut(response, payload)) return false;
   if (!response?.ok) {
@@ -2939,36 +2945,35 @@ $("tentativePlanForm").addEventListener("submit", async (event) => {
     repeat: String(form.get("repeat") || "none"),
     updatedAt: new Date().toISOString(),
   };
-  // Editing the plan keeps the picked time, votes and RSVPs.
   const previous = session.state.plan;
-  if (previous) {
-    for (const key of ["chosen", "chosenEnd", "timeZone", "timeVotes", "rsvp", "createdBy", "createdAt", "chosenBy", "nudgedAt", "comments"]) {
-      if (previous[key] !== undefined) plan[key] = previous[key];
-    }
-  } else {
-    plan.createdBy = memberId;
-    plan.createdAt = new Date().toISOString();
-  }
   // Opened from "Plan something": that window becomes the plan's time.
-  if (ui.pendingWindow) {
-    plan.chosen = ui.pendingWindow.start.toISOString();
-    plan.chosenEnd = ui.pendingWindow.end.toISOString();
-    plan.timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    plan.chosenBy = memberId;
-    ui.pendingWindow = null;
-  }
+  const picked = ui.pendingWindow
+    ? { chosen: ui.pendingWindow.start.toISOString(), chosenEnd: ui.pendingWindow.end.toISOString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, chosenBy: memberId }
+    : null;
+  ui.pendingWindow = null;
   if (plan.timing === "range" && plan.start && plan.end && plan.end < plan.start) {
     showToast("The end of the range comes before the start.");
     return;
   }
   const saved = await mutate((draft) => {
-    draft.plan = plan;
+    // Editing keeps the picked time, votes, RSVPs and comments, read from the
+    // copy being saved: if someone else saved first, theirs are kept too.
+    const kept = {};
+    if (draft.plan) {
+      for (const key of ["chosen", "chosenEnd", "timeZone", "timeVotes", "rsvp", "createdBy", "createdAt", "chosenBy", "nudgedAt", "comments"]) {
+        if (draft.plan[key] !== undefined) kept[key] = draft.plan[key];
+      }
+    } else {
+      kept.createdBy = memberId;
+      kept.createdAt = new Date().toISOString();
+    }
+    draft.plan = { ...plan, id: draft.plan?.id || plan.id, ...kept, ...(picked || {}) };
   }, { note: `Tentative plan: ${plan.activity}` });
   dialogs.plan.close();
   showToast("Tentative plan saved — suggested windows are below.");
   // Tell the group (people with notifications on get a push).
   if (saved && !previous) announce("plan-proposed");
-  if (saved && plan.chosen && plan.chosen !== previous?.chosen) announce("time-chosen");
+  if (saved && picked && picked.chosen !== previous?.chosen) announce("time-chosen");
 });
 
 $("rsvpRow").addEventListener("click", async (event) => {
@@ -3686,6 +3691,12 @@ $("settingsButton").addEventListener("click", () => {
   $("settingWorkspaceName").value = session.state.name;
   const pair = groupKind() === "pair";
   $("settingGroupKind").value = pair ? "friends" : groupKind();
+  // Only the owner can turn an organization back into a friends group (the server checks too).
+  const pinned = groupKind() === "organization" && Boolean(session.state.ownerId) && session.state.ownerId !== ui.user?.id;
+  $("settingGroupKind").disabled = pinned;
+  $("groupKindHint").textContent = pinned
+    ? "Only the group's owner can change an organization's type."
+    : "An organization, club, team or workplace never sees event names or places, only when people are free.";
   for (const id of ["settingGroupKind", "groupKindHint"]) $(id).hidden = pair;
   $("settingGroupKind").previousElementSibling.hidden = pair;
   $("settingWeekStart").value = String(config.weekStartsOn);

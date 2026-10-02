@@ -374,16 +374,37 @@ test("API: without a database there are no invite links", async () => {
 
 test("a guest adds and deletes only their own comments; the server stamps the time", async () => {
   const { state, memberId } = addGuest(detailedGroup(), { name: "Casey", hash: await hashToken(newGuestToken()) });
+  const planId = state.plan.id;
   const withAda = normalizeWorkspaceState({ ...state, plan: { ...state.plan, comments: [{ id: "c_ada", memberId: "m_ada", text: "Booked a table", at: "2026-01-01T10:00:00Z" }] } });
   const now = new Date("2026-10-05T12:00:00Z");
   const added = applyGuestUpdate(withAda, memberId, {
-    comments: [{ id: "c_me", text: "  Can't wait ", at: "1999-01-01T00:00:00Z", memberId: "m_ada" }],
+    comments: { planId, keep: ["c_ada"], add: [{ id: "c_me", text: "  Can't wait ", at: "1999-01-01T00:00:00Z", memberId: "m_ada" }] },
   }, now).state;
   assert.deepEqual(added.plan.comments.map((c) => [c.id, c.memberId, c.text]), [["c_ada", "m_ada", "Booked a table"], ["c_me", memberId, "Can't wait"]]);
   assert.equal(added.plan.comments[1].at, now.toISOString(), "not the time the guest claimed");
-  // Sending an empty list deletes theirs, never Ada's.
-  const cleared = applyGuestUpdate(added, memberId, { comments: [] }, now).state;
+  // Not keeping it deletes theirs, never Ada's.
+  const cleared = applyGuestUpdate(added, memberId, { comments: { planId, keep: [], add: [] } }, now).state;
   assert.deepEqual(cleared.plan.comments.map((c) => c.id), ["c_ada"]);
-  // Reading back sends exactly the guest's own.
-  assert.deepEqual(guestUpdateFrom(added, memberId).comments, [{ id: "c_me", text: "Can't wait" }]);
+  // Reading back: kept vs new, against the state the edit started from.
+  assert.deepEqual(guestUpdateFrom(added, memberId, now, withAda).comments, { planId, keep: [], add: [{ id: "c_me", text: "Can't wait" }] });
+  assert.deepEqual(guestUpdateFrom(added, memberId, now, added).comments, { planId, keep: ["c_me"], add: [] });
+});
+
+test("a stale guest page never brings comments back, and guests never push others' comments out", async () => {
+  const { state, memberId } = addGuest(detailedGroup(), { name: "Casey", hash: await hashToken(newGuestToken()) });
+  const now = new Date("2026-10-05T12:00:00Z");
+  // A comment from an older plan, sent against a new plan: ignored.
+  const other = applyGuestUpdate(state, memberId, { comments: { planId: "plan_old", keep: [], add: [{ id: "c_old", text: "hi" }] } }, now).state;
+  assert.equal(other.plan.comments, undefined);
+  // A full plan takes no more guest comments, so nobody's history is pushed out.
+  const full = Array.from({ length: 100 }, (_, i) => ({ id: `m${i}`, memberId: "m_ada", text: `#${i}`, at: new Date(Date.UTC(2026, 9, 1, 0, i)).toISOString() }));
+  const busy = normalizeWorkspaceState({ ...state, plan: { ...state.plan, comments: full } });
+  const after = applyGuestUpdate(busy, memberId, { comments: { planId: state.plan.id, keep: [], add: [{ id: "c_me", text: "late" }] } }, now).state;
+  assert.equal(after.plan.comments.length, 100);
+  assert.equal(after.plan.comments[0].id, "m0");
+  // Ids are cut to 40 characters the same way when checked and when stored.
+  const long = "x".repeat(60);
+  const once = applyGuestUpdate(state, memberId, { comments: { planId: state.plan.id, keep: [], add: [{ id: long, text: "a" }] } }, now).state;
+  const twice = applyGuestUpdate(once, memberId, { comments: { planId: state.plan.id, keep: [long], add: [{ id: long, text: "a" }] } }, new Date("2026-10-06T12:00:00Z")).state;
+  assert.deepEqual(twice.plan.comments.map((c) => [c.id.length, c.at]), [[40, now.toISOString()]]);
 });

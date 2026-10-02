@@ -2,7 +2,7 @@
 
 The complete picture of what Waddle is supposed to do, where each piece lives, what proves it works, and what's left. Use it as the checklist before calling Waddle "done", and update it whenever a feature is added or changed. The product rules for what each view may show are in [CLAUDE.md](CLAUDE.md) and win over anything here.
 
-Last checked: 2026-10-02, with the suggested best time and plan comments: 284 unit/API tests and 69 browser tests, all passing; `rls-server-test.sql` 10/10 on the live project. Database rules re-checked on the live project 2026-10-01 after the phone-number schema: `rls-test.sql` 22/22 and `rls-shares-test.sql` 24/24.
+Last checked: 2026-10-02, after the development-manager review (best time, plan comments, locked groups): 289 unit/API tests and 69 browser tests, all passing; `rls-server-test.sql` 10/10 on the live project. Database rules re-checked on the live project 2026-10-01 after the phone-number schema: `rls-test.sql` 22/22 and `rls-shares-test.sql` 24/24.
 
 ## 1. What Waddle is
 
@@ -164,6 +164,24 @@ Done when: all rows are ✅ except the 🙋 ones, and both test commands pass. D
 - ~~Reminders before a plan starts.~~ Done 2026-09-27 (notifications).
 - ~~Suggest a time automatically from everyone's free windows and open votes.~~ Done 2026-10-02: "Best time" on the plan card.
 - ~~A shared plan chat or comments.~~ Done 2026-10-02: "Talk it over" under the plan.
+
+## 4b. Reviews
+
+### 2026-10-02: development-manager read-only review of PR #26 (friends, phone, organizations, always busy) and PR #30 (best time, comments)
+
+Two read-only reviewers (correctness; security and privacy) found no blockers. Should-fix findings and what was done:
+
+| Finding | Fix | Proven by |
+|---|---|---|
+| Best time could prefer more people free over a voted time | `suggestBestTime` ranks votes, then people free, then sooner | `hangout` test "one vote beats more people free" |
+| Editing a plan could drop comments, votes or RSVPs saved by someone else at the same moment | The kept fields are copied from the copy being saved, inside `mutate` | browser test "comments: … kept when the plan is edited" |
+| A stale guest page could bring deleted comments back, or onto a new plan | Guests send `{ planId, keep, add }`; only genuinely new comments are added, and only to the plan they saw | `guests` test "a stale guest page never brings comments back" |
+| Guests could push everyone else's comments out of the 100-comment cap; long ids were re-added on every save | A full plan takes no more guest comments; ids are cut to 40 characters before comparing | same `guests` test |
+| A member's whole-group save could rewrite, delete or forge other people's comments | The server keeps everyone else's comments as stored and stamps new ones (`mergeMemberComments`) | `api` test "a member's save keeps everyone else's comments" |
+| A non-owner could turn an organization back into a friends group | The server keeps `kind: "organization"` unless the owner changes it; Settings disables the choice for others | `api` test "only the owner can turn an organization back" |
+| A locked group (every 1-on-1) could be read by any signed-in account with the link; a refused save sent the whole group back | Only the owner, signed-in members and pending email invitees can open it; refusals carry nothing about the group | `api` test "a locked group … tells an outsider nothing" |
+
+Accepted as designed (Alexi can change): removing a plan deletes its comments; a member who leaves takes their comments with them.
 
 ## 5. Release checklist (run before calling any change done)
 

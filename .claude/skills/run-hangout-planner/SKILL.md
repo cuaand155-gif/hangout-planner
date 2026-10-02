@@ -95,7 +95,7 @@ Useful selectors:
 ## Test
 
 ```bash
-npm test          # node --test "test/*.test.mjs"; 284 passing, about 5 s
+npm test          # node --test "test/*.test.mjs"; 289 passing, about 5 s
 npm run test:e2e  # node --test "test/e2e/*.e2e.mjs"; 69 browser tests, about 3 min
 ```
 

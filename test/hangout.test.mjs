@@ -146,3 +146,13 @@ test("a plan keeps its comments through normalization, minus people who left", a
   assert.deepEqual(state.plan.comments, [{ id: "c1", memberId: "a", text: "Yum", at: "2026-10-05T09:00:00.000Z" }]);
   assert.equal("comments" in normalizeWorkspaceState({ plan: { activity: "x" } }).plan, false);
 });
+
+test("suggestBestTime: one vote beats more people free, and a later voted time beats a sooner one", async () => {
+  const { suggestBestTime } = await import("../lib/hangout.js");
+  const now = new Date("2026-10-05T08:00:00Z");
+  const voted = { start: new Date("2026-11-30T18:00:00Z"), end: new Date("2026-11-30T20:00:00Z"), voters: ["a"], free: 3 };
+  const everyone = { start: new Date("2026-10-06T18:00:00Z"), end: new Date("2026-10-06T20:00:00Z"), voters: [], free: 6 };
+  const best = suggestBestTime([everyone, voted], { memberCount: 6, now });
+  assert.equal(best.start.toISOString(), voted.start.toISOString());
+  assert.equal(best.reason, "1 vote · 3 of 6 free");
+});
