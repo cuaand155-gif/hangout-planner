@@ -1075,7 +1075,7 @@ describe("groups", () => {
     await go("/");
     await page.locator("#groupsButton").click();
     assert.deepEqual(await texts(page, "#groupList .group-row strong"), ["Weekend crew"]);
-    assert.match(await page.locator("#groupList .group-row.current").innerText(), /OPEN/);
+    assert.match(await page.locator("#groupList .group-row.current").innerText(), /CURRENT/);
 
     await page.fill("#newGroupName", "Book club");
     await Promise.all([page.waitForURL(/\?w=book-club-[a-z2-9]{5}$/), page.locator("#newGroupForm button[type=submit]").click()]);
@@ -1180,11 +1180,17 @@ describe("people", () => {
     // Remove the placeholder from the dialog, and a member from their card.
     await page.locator("#managePeople").click();
     const jordan = await page.evaluate(() => JSON.parse(localStorage.getItem("gatherly-workspace:weekend-crew")).members.find((member) => member.name === "Jordan Lee").id);
+    // Removing someone asks first.
+    page.once("dialog", (dialog) => {
+      assert.match(dialog.message(), /Remove Jordan Lee from this group\?/);
+      dialog.accept();
+    });
     await page.locator(`#savedPeople [data-remove-member="${jordan}"]`).click();
     await toastSays(page, /Jordan Lee removed from this group/);
     await page.locator("#peopleDialog .close-dialog").click();
     const gamesVotes = () => page.locator(".idea-card", { hasText: "Games night" }).locator(".idea-meta").innerText();
     assert.match(await gamesVotes(), /2 votes/);
+    page.once("dialog", (dialog) => dialog.accept());
     await page.locator('#peopleGrid [data-remove-member="demo_riley"]').click();
     await toastSays(page, /Riley Lee removed from this group/);
     assert.equal(await page.locator("#peopleCount").innerText(), "3 PEOPLE");
@@ -1986,6 +1992,7 @@ describe("guests: invite links work without an account", () => {
     const alexi = await open({ signedIn: true });
     await alexi.go(`/?w=${SLUG}`);
     await alexi.page.locator("#managePeople").click();
+    alexi.page.once("dialog", (dialog) => dialog.accept());
     await alexi.page.locator(`#savedPeople [data-remove-member="${id}"]`).click();
     await toastSays(alexi.page, /Casey removed, with their votes/);
     const after = await db.group();
@@ -2003,7 +2010,7 @@ describe("guests: invite links work without an account", () => {
     await seedGroup();
     const html = await (await fetch(`${state.dbBase}/p/${SLUG}?i=${CODE}`)).text();
     const tag = (name) => new RegExp(`<meta (?:property|name)="${name}" content="([^"]*)"`).exec(html)?.[1];
-    assert.equal(tag("og:title"), "Dinner · vote on a time");
+    assert.equal(tag("og:title"), "Dinner · RSVP", "its time is picked, so the link asks for RSVPs");
     assert.equal(tag("twitter:card"), "summary_large_image");
     const head = html.slice(0, html.indexOf("</head>"));
     for (const secret of ["Alexi", "Sam Rivera", "Climbing", "Basecamp", "Dentist", "Luma", "alexi@example.com"]) assert.ok(!head.includes(secret), `the preview mentions ${secret}`);
@@ -2209,7 +2216,7 @@ describe("notifications", () => {
     assert.equal(await sam.page.evaluate(() => window.__permissionAsked), 0, "never asked on page load");
     await sam.page.locator("#activityButton").click();
     await sam.page.locator("#pushToggle").waitFor();
-    assert.equal(await sam.page.locator("#pushToggle").innerText(), "Turn on notifications");
+    assert.equal(await sam.page.locator("#pushToggle").innerText(), "Turn on");
     await sam.page.locator("#pushToggle").click();
     await toastSays(sam.page, /Notifications are on for this device/);
     assert.equal(await sam.page.evaluate(() => window.__permissionAsked), 1);
@@ -2245,7 +2252,7 @@ describe("notifications", () => {
     await nudge.click();
     await toastSays(page, /Nudged 1 person: they'll see it in the bell\. 1 got a notification/);
     await page.waitForFunction(() => document.querySelector("#nudgeVoters").disabled);
-    assert.match(await nudge.innerText(), /^Nudged · again /);
+    assert.match(await nudge.innerText(), /^Nudged · you can nudge again /);
     const tables = await fakeDb.tables();
     assert.deepEqual(tables._push.map((entry) => entry.endpoint), ["https://push.waddle.test/sam-phone"]);
     assert.match(tables.workspaces[0].state.activity[0].message, /nudged people who haven't voted/);
