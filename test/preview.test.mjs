@@ -67,6 +67,9 @@ test("a plan preview is its title and 'vote on a time', and nothing about the pe
   assert.equal(preview.action, "Vote on a time");
   const text = JSON.stringify(preview);
   for (const name of NAMES) assert.ok(!text.includes(name), `the preview mentions ${name}`);
+  const picked = previewFor(group({ plan: { ...group().plan, chosen: "2026-10-04T22:00:00.000Z" } }), { kind: "p" });
+  assert.equal(picked.title, "Board games · RSVP", "once a time is picked the link asks for RSVPs, not votes");
+  assert.equal(picked.action, "RSVP");
   assert.equal(previewFor(group(), { kind: "g" }).title, "Book club · find a time on Waddle");
   assert.equal(previewFor(group({ plan: null }), { kind: "p" }).headline, "Book club", "a plan link without a plan falls back to the group");
   assert.equal(cleanText("a\n\tb c   d"), "a b c d");

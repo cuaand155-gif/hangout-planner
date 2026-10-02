@@ -34,6 +34,14 @@ export function previewFor(state, { kind = "g" } = {}) {
   const activity = cleanText(plan?.activity);
   const name = cleanText(state?.name, 60) || "Your group";
   const privacy = "No account needed. Waddle shares busy or free, never what anyone's doing.";
+  if (kind === "p" && activity && plan?.chosen) {
+    return {
+      title: `${activity} · RSVP`,
+      description: `A time is picked. RSVP in a tap. ${privacy}`,
+      headline: activity,
+      action: "RSVP",
+    };
+  }
   if (kind === "p" && activity) {
     return {
       title: `${activity} · vote on a time`,

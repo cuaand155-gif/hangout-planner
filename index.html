@@ -65,7 +65,7 @@
           <p id="gateCopy">Groups share when people are free, so only signed-in people can open them. It's free and takes one tap with Google.</p>
           <form class="guest-join" id="guestJoinForm" hidden>
             <label class="field-label" for="guestName">Your name</label>
-            <input class="text-input" id="guestName" name="name" autocomplete="given-name" placeholder="Casey" required maxlength="60" />
+            <input class="text-input" id="guestName" name="name" autocomplete="given-name" placeholder="Your first name" required maxlength="60" />
             <button class="primary-button full" type="submit">Join as a guest</button>
           </form>
           <button class="primary-button full" type="button" id="gateSignIn">Sign in with Google</button>
@@ -137,7 +137,7 @@
 
           <section class="tentative-section" id="tentativePlanSection" hidden>
             <div class="section-heading compact">
-              <div><p class="eyebrow">JUST A THOUGHT</p><h2>Keep a maybe on the calendar</h2><p>Save the idea now and find the best time with your group later.</p></div>
+              <div><p class="eyebrow" id="tentativeEyebrow">JUST A THOUGHT</p><h2 id="tentativeHeading">Keep a maybe on the calendar</h2><p id="tentativeLead">Save the idea now and find the best time with your group later.</p></div>
               <div class="heading-actions">
                 <button class="text-button member-only" id="nudgeVoters" hidden>Nudge people who haven't voted</button>
                 <button class="text-button" id="sharePlan"><svg class="icon" aria-hidden="true"><use href="#i-share"/></svg> Share plan</button>
@@ -280,7 +280,7 @@
       </main>
     </div>
 
-    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <div class="toast" id="toast" role="status" aria-live="polite" popover="manual"></div>
 
     <dialog id="privacyDialog">
       <div class="dialog-header"><div><p class="eyebrow">PRIVACY CONTROLS</p><h2>Your calendar, your call.</h2></div><button class="close-dialog" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
