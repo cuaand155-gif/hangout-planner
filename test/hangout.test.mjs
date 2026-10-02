@@ -93,3 +93,66 @@ test("a repeating plan exports one event with a rule, in its own time zone", () 
   assert.equal(link.searchParams.get("recur"), "RRULE:FREQ=WEEKLY");
   assert.equal(link.searchParams.get("ctz"), zone);
 });
+
+test("suggestBestTime: votes count most, then who's free, then sooner", async () => {
+  const { suggestBestTime } = await import("../lib/hangout.js");
+  const now = new Date("2026-10-05T08:00:00Z");
+  const at = (iso) => new Date(iso);
+  const options = [
+    { start: at("2026-10-06T18:00:00Z"), end: at("2026-10-06T20:00:00Z"), voters: [], free: 3 },
+    { start: at("2026-10-08T18:00:00Z"), end: at("2026-10-08T20:00:00Z"), voters: ["a", "b"], free: 2 },
+    { start: at("2026-10-04T18:00:00Z"), end: at("2026-10-04T20:00:00Z"), voters: ["a", "b", "c"], free: 3 },
+  ];
+  const best = suggestBestTime(options, { memberCount: 3, now });
+  assert.equal(best.start.toISOString(), "2026-10-08T18:00:00.000Z", "the past option never wins");
+  assert.equal(best.reason, "2 votes · 2 of 3 free");
+  const noVotes = suggestBestTime([options[0], { ...options[0], start: at("2026-10-07T18:00:00Z") }], { memberCount: 3, now });
+  assert.equal(noVotes.start.toISOString(), "2026-10-06T18:00:00.000Z");
+  assert.equal(noVotes.reason, "everyone's free · soonest");
+  assert.equal(suggestBestTime([], { now }), null);
+  assert.equal("score" in best, false);
+});
+
+test("comments: tidy, add once, and only the writer removes theirs", async () => {
+  const { COMMENT_LIMITS, addComment, normalizeComments, removeComment } = await import("../lib/hangout.js");
+  const members = new Set(["a", "b"]);
+  const stored = normalizeComments([
+    { id: "c2", memberId: "b", text: "  Sounds   good \n\n\n\nsee you ", at: "2026-10-05T10:00:00Z" },
+    { id: "c1", memberId: "a", text: "Pizza?", at: "2026-10-05T09:00:00Z" },
+    { id: "c1", memberId: "a", text: "duplicate", at: "2026-10-05T09:30:00Z" },
+    { id: "c3", memberId: "gone", text: "left the group", at: "2026-10-05T11:00:00Z" },
+    { id: "c4", memberId: "a", text: "   ", at: "2026-10-05T11:00:00Z" },
+    "junk",
+  ], members);
+  assert.deepEqual(stored.map((c) => [c.id, c.text]), [["c1", "Pizza?"], ["c2", "Sounds good\n\nsee you"]]);
+  const more = addComment(stored, { id: "c5", memberId: "a", text: "x".repeat(900), at: new Date("2026-10-05T12:00:00Z") });
+  assert.equal(more.length, 3);
+  assert.equal(more[2].text.length, COMMENT_LIMITS.text);
+  assert.equal(addComment(more, { id: "c5", memberId: "a", text: "again" }), more, "same id twice is ignored");
+  assert.equal(removeComment(more, "c2", "a").length, 3, "not yours to remove");
+  assert.deepEqual(removeComment(more, "c2", "b").map((c) => c.id), ["c1", "c5"]);
+  const many = Array.from({ length: 130 }, (_, i) => ({ id: `m${i}`, memberId: "a", text: `#${i}`, at: new Date(Date.UTC(2026, 9, 5, 0, i)).toISOString() }));
+  const kept = normalizeComments(many, members);
+  assert.equal(kept.length, COMMENT_LIMITS.perPlan);
+  assert.equal(kept[0].id, "m30", "the latest ones are kept");
+});
+
+test("a plan keeps its comments through normalization, minus people who left", async () => {
+  const { normalizeWorkspaceState } = await import("../lib/planner.js");
+  const state = normalizeWorkspaceState({
+    members: [{ id: "a", name: "A" }],
+    plan: { activity: "Dinner", comments: [{ id: "c1", memberId: "a", text: "Yum", at: "2026-10-05T09:00:00Z" }, { id: "c2", memberId: "zz", text: "?", at: "2026-10-05T09:00:00Z" }] },
+  });
+  assert.deepEqual(state.plan.comments, [{ id: "c1", memberId: "a", text: "Yum", at: "2026-10-05T09:00:00.000Z" }]);
+  assert.equal("comments" in normalizeWorkspaceState({ plan: { activity: "x" } }).plan, false);
+});
+
+test("suggestBestTime: one vote beats more people free, and a later voted time beats a sooner one", async () => {
+  const { suggestBestTime } = await import("../lib/hangout.js");
+  const now = new Date("2026-10-05T08:00:00Z");
+  const voted = { start: new Date("2026-11-30T18:00:00Z"), end: new Date("2026-11-30T20:00:00Z"), voters: ["a"], free: 3 };
+  const everyone = { start: new Date("2026-10-06T18:00:00Z"), end: new Date("2026-10-06T20:00:00Z"), voters: [], free: 6 };
+  const best = suggestBestTime([everyone, voted], { memberCount: 6, now });
+  assert.equal(best.start.toISOString(), voted.start.toISOString());
+  assert.equal(best.reason, "1 vote · 3 of 6 free");
+});

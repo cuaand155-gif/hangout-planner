@@ -40,8 +40,9 @@ function withAuth(rest) {
   return async (url, options = {}) => {
     if (String(url).includes("/auth/v1/user")) {
       const token = String(options.headers?.Authorization || "").replace("Bearer ", "");
-      const users = { "good-token": "user-1", "other-token": "user-2" };
-      return users[token] ? new Response(JSON.stringify({ id: users[token] }), { status: 200 }) : new Response("{}", { status: 401 });
+      const users = { "good-token": "user-1", "other-token": "user-2", "invitee-token": "user-3" };
+      const emails = { "user-3": "Cleo@Example.com" };
+      return users[token] ? new Response(JSON.stringify({ id: users[token], email: emails[users[token]] || "" }), { status: 200 }) : new Response("{}", { status: 401 });
     }
     return rest(url, options);
   };
@@ -447,4 +448,98 @@ test("the calendar endpoint also never crashes the function", async (t) => {
   await calendarHandler(request, response);
   assert.equal(response.captured.status, 502);
   assert.equal(response.captured.body.detail, "Error");
+});
+
+/** A database stub holding one group; PATCH writes are kept so a test can read them back. */
+function oneGroup(t, state) {
+  process.env.SUPABASE_URL = "https://example.supabase.co";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-key";
+  t.after(() => {
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  });
+  const row = { slug: "team", state, updated_at: "2026-09-21T10:00:00.000Z" };
+  t.mock.method(globalThis, "fetch", withAuth(async (url, options = {}) => {
+    if (options.method === "PATCH") {
+      row.state = JSON.parse(options.body).state;
+      row.updated_at = new Date(Date.parse(row.updated_at) + 1000).toISOString();
+      return new Response(JSON.stringify([{ ...row }]), { status: 200 });
+    }
+    return new Response(JSON.stringify([row]), { status: 200 });
+  }));
+  return row;
+}
+
+test("a locked group (a 1-on-1 too) tells an outsider nothing, but opens for its members and its invitees", async (t) => {
+  oneGroup(t, {
+    name: "Alexi & Sam",
+    kind: "pair",
+    ownerId: "user-1",
+    settings: { locked: true },
+    members: [
+      { id: "a", name: "Alexi", userId: "user-1", email: "alexi@example.com" },
+      { id: "c", name: "Cleo", email: "cleo@example.com", pending: true },
+    ],
+    plan: { id: "p1", activity: "Coffee", comments: [{ id: "c1", memberId: "a", text: "secret plans", at: "2026-09-21T09:00:00.000Z" }] },
+  });
+  const outsider = await call(workspaceHandler, { method: "GET", query: { slug: "team" }, headers: { authorization: "Bearer other-token" } });
+  assert.equal(outsider.status, 403);
+  assert.equal(outsider.body.locked, true);
+  assert.equal(JSON.stringify(outsider.body).includes("Alexi"), false, "not even who is in it");
+  assert.equal(JSON.stringify(outsider.body).includes("secret plans"), false);
+
+  const write = await call(workspaceHandler, { method: "PUT", query: { slug: "team" }, headers: { authorization: "Bearer other-token" }, body: { state: { name: "x" } } });
+  assert.equal(write.status, 403);
+  assert.equal(write.body.state, undefined, "a refused save sends nothing back either");
+
+  const member = await call(workspaceHandler, { method: "GET", query: { slug: "team" }, headers: { authorization: "Bearer good-token" } });
+  assert.equal(member.status, 200);
+  const invitee = await call(workspaceHandler, { method: "GET", query: { slug: "team" }, headers: { authorization: "Bearer invitee-token" } });
+  assert.equal(invitee.status, 200, "the person a pending invite is addressed to can come in and claim it");
+});
+
+test("only the owner can turn an organization back into a friends group", async (t) => {
+  const row = oneGroup(t, {
+    name: "Robotics",
+    kind: "organization",
+    ownerId: "user-1",
+    members: [{ id: "a", name: "Ada", userId: "user-1" }, { id: "b", name: "Bo", userId: "user-2" }],
+  });
+  const sneaky = await call(workspaceHandler, {
+    method: "PUT",
+    query: { slug: "team" },
+    headers: { authorization: "Bearer other-token" },
+    body: { rev: row.updated_at, state: { ...row.state, kind: "friends", privacy: "details", members: [{ id: "a", name: "Ada", userId: "user-1" }, { id: "b", name: "Bo", userId: "user-2", busy: [{ start: "2026-10-05T13:00:00Z", end: "2026-10-05T14:00:00Z", title: "Therapy", source: "google" }] }] } },
+  });
+  assert.equal(sneaky.status, 200);
+  assert.equal(sneaky.body.state.kind, "organization");
+  assert.equal(sneaky.body.state.privacy, "busy");
+  assert.equal(JSON.stringify(row.state).includes("Therapy"), false, "names are still stripped");
+
+  const owner = await call(workspaceHandler, { method: "PUT", query: { slug: "team" }, headers: { authorization: "Bearer good-token" }, body: { rev: row.updated_at, state: { ...row.state, kind: "friends" } } });
+  assert.equal(owner.body.state.kind, undefined, "back to an ordinary group");
+});
+
+test("a member's save keeps everyone else's comments as they were, and stamps new ones", async (t) => {
+  const row = oneGroup(t, {
+    name: "Team",
+    members: [{ id: "a", name: "Ada", userId: "user-1" }, { id: "b", name: "Bo", userId: "user-2" }],
+    plan: { id: "p1", activity: "Dinner", comments: [{ id: "c_ada", memberId: "a", text: "Booked it", at: "2026-09-21T09:00:00.000Z" }, { id: "c_bo", memberId: "b", text: "Yay", at: "2026-09-21T09:05:00.000Z" }] },
+  });
+  const forged = {
+    ...row.state,
+    plan: {
+      ...row.state.plan,
+      comments: [
+        { id: "c_ada", memberId: "a", text: "Cancelled, sorry", at: "2026-09-21T09:00:00.000Z" }, // rewriting Ada's
+        { id: "c_fake", memberId: "a", text: "Bo owes me $50", at: "2020-01-01T00:00:00.000Z" }, // posting as Ada
+        { id: "c_new", memberId: "b", text: "See you there", at: "2020-01-01T00:00:00.000Z" }, // Bo's own, backdated
+      ],
+    },
+  };
+  const saved = await call(workspaceHandler, { method: "PUT", query: { slug: "team" }, headers: { authorization: "Bearer other-token" }, body: { rev: row.updated_at, state: forged } });
+  assert.equal(saved.status, 200);
+  const comments = saved.body.state.plan.comments;
+  assert.deepEqual(comments.map((c) => [c.id, c.text]), [["c_ada", "Booked it"], ["c_new", "See you there"]], "Bo deleted only his own and added his own");
+  assert.notEqual(comments[1].at, "2020-01-01T00:00:00.000Z", "the server's time, not the browser's");
 });

@@ -151,6 +151,7 @@
                 <span class="tentative-label">TENTATIVE PLAN</span>
                 <h3 id="tentativeTitle"></h3>
                 <p id="tentativeTiming"></p>
+                <div class="best-time" id="bestTime" hidden></div>
                 <div class="suggestions" id="tentativeSuggestions"></div>
                 <div class="rsvp" id="rsvpRow" hidden>
                   <span>Are you in?</span>
@@ -166,6 +167,15 @@
                   <a class="calendar-add-button" id="addToGoogle" href="#" target="_blank" rel="noopener">Google Calendar</a>
                   <button class="calendar-add-button" type="button" id="downloadIcs">Apple / Outlook</button>
                   <small id="calendarAddNote"></small>
+                </div>
+                <div class="plan-chat" id="planChat">
+                  <p class="plan-chat-label" id="planChatLabel">Talk it over</p>
+                  <div class="comment-list" id="commentList" aria-live="polite"></div>
+                  <form class="comment-form" id="commentForm">
+                    <label class="sr-only" for="commentText">Comment on the plan</label>
+                    <textarea class="text-input" id="commentText" rows="1" maxlength="500" placeholder="Add a comment…"></textarea>
+                    <button class="outline-button" type="submit" id="commentSend">Send</button>
+                  </form>
                 </div>
               </div>
               <span class="tentative-badge" id="tentativeBadge">Not confirmed</span>

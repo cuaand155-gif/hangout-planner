@@ -2,7 +2,7 @@
 
 The complete picture of what Waddle is supposed to do, where each piece lives, what proves it works, and what's left. Use it as the checklist before calling Waddle "done", and update it whenever a feature is added or changed. The product rules for what each view may show are in [CLAUDE.md](CLAUDE.md) and win over anything here.
 
-Last checked: 2026-09-27, with notifications (bell, push, nudges, reminders): 279 unit/API tests and 66 browser tests, all passing; `rls-server-test.sql` 10/10 on the live project.
+Last checked: 2026-10-02, after the development-manager review (best time, plan comments, locked groups): 289 unit/API tests and 69 browser tests, all passing; `rls-server-test.sql` 10/10 on the live project. Database rules re-checked on the live project 2026-10-01 after the phone-number schema: `rls-test.sql` 22/22 and `rls-shares-test.sql` 24/24.
 
 ## 1. What Waddle is
 
@@ -52,7 +52,7 @@ Status key: ✅ proven by an automated browser test · 🧪 proven by unit/API t
 | Guest writes are rate-limited (40 per 5 min per guest, 20 joins per hour per group) and size-capped (256 KB) | `countWrite`, `api/workspace.js` | `guests` API tests | 🧪 (server only, no screen) |
 | Friend requests (send, accept) | Friends page (sidebar), `lib/friends.js` | e2e "send a friend request, they accept it…" (two browsers); `friends` tests | ✅ |
 | Friends page: friends without a group | `#friendsDialog`, sidebar Friends | e2e "the Friends page: a request by phone number…" | ✅ |
-| Friend requests by phone number | `lib/friends.js`, `lib/phone.js`, `recipient_phone` | e2e "…by phone number, accepted by the person with that number" (two browsers); `friends`, `phone` tests; `supabase/rls-test.sql` phone checks | ✅ in the app; 🙋 run `schema.sql` and `rls-test.sql` on the live project |
+| Friend requests by phone number | `lib/friends.js`, `lib/phone.js`, `recipient_phone` | e2e "…by phone number, accepted by the person with that number" (two browsers); `friends`, `phone` tests; `supabase/rls-test.sql` phone checks (22/22 on the live project, 2026-10-01) | ✅ |
 | 1-on-1 with a friend: "You're both free", plan it, same space for both | Friends → Calendar / 1-on-1, `pairSlug`, `freeTogether` | e2e "a 1-on-1 with a friend…" (both friends reach the same link); `groups-sync`, `planner` tests | ✅ |
 | Organization or business groups (free/busy only, always) | Your groups → Start a new group, Settings → Group type, `normalizeWorkspaceState` | e2e "an organization group is free/busy only…"; `planner` test (names stripped on save) | ✅ |
 | Getting-started checklist for new groups | `lib/checklist.js` | e2e "getting-started checklist…"; `checklist` tests | ✅ |
@@ -90,7 +90,7 @@ Status key: ✅ proven by an automated browser test · 🧪 proven by unit/API t
 | Share more for a while (today, weekend, 24 h, 7 days) | `grantEnd`, `publish_share` RPC | e2e "share more for a while…" (start, until, fallback, stop); `sharing` tests | ✅ |
 | Private events hidden from everyone (only a hash is stored) | `hideHash`, `withoutHidden` | `sharing` tests; e2e (preview, as Sam, and in the group) | ✅ |
 | Choices sync across devices | `sharing_settings`, `mergeSharing` | e2e "sharing choices follow you to another device" (second browser, fake database); `sharing` tests | ✅ (real accounts: 🙋) |
-| Database only lets friends read what was shared | RLS, `publish_share`, `shared_calendars` | `supabase/rls-test.sql` (14 checks) and `supabase/rls-shares-test.sql` (24 checks), run against the live project inside a transaction that rolls back | ✅ 38/38 on 2026-09-26 |
+| Database only lets friends read what was shared | RLS, `publish_share`, `shared_calendars` | `supabase/rls-test.sql` (22 checks, phone numbers included) and `supabase/rls-shares-test.sql` (24 checks), run against the live project inside a transaction that rolls back | ✅ 46/46 on 2026-10-01 |
 | Free now status and strip | `lib/presence.js` | e2e "Free now strip" | ✅ |
 
 ### Plans
@@ -98,6 +98,8 @@ Status key: ✅ proven by an automated browser test · 🧪 proven by unit/API t
 | Feature | Where | Proven by | Status |
 |---|---|---|---|
 | Propose a plan, vote on times, pick one, RSVP | Tentative plan, `lib/hangout.js` | e2e "propose a plan…" | ✅ |
+| Best time: one suggested time from the votes and who's free, picked with one tap (never picked by itself) | `#bestTime`, `suggestBestTime`, `whoIsFree` | e2e "the best time follows the votes, and one tap picks it"; `hangout`, `planner` tests | ✅ |
+| Talk the plan over: comments under the plan; members and guests add theirs and delete only their own | `#planChat`, `plan.comments`, `applyGuestUpdate` | e2e "comments: send with Enter…", "a guest talks the plan over…"; `hangout`, `guests` tests | ✅ |
 | Repeating plans (weekly etc.) | `#planRepeat` | e2e "repeating plans roll on…"; `hangout` tests | ✅ |
 | Add to calendar (.ics file or Google link) | `lib/calendar-export.js` | e2e "add to calendar…" (the .ics file and the Google link's contents; Google itself is never opened); `calendar-export` tests | ✅ |
 | Activity ideas with photos | Ideas section | e2e "an idea with a photo…"; `idea-photos` tests | ✅ |
@@ -150,18 +152,36 @@ Done when: all rows are ✅ except the 🙋 ones, and both test commands pass. D
 
 1. ~~**Reconnect Google once**~~ Done: the server holds a Google connection saved 2026-09-25 with the live keys.
 2. **Turn on phone features** (new, 2026-09-26):
-   - Run the updated `supabase/schema.sql` in the Supabase SQL editor (adds `recipient_phone` to friend requests and lets phone-only accounts get a profile), then run `supabase/rls-test.sql`: every row should read `passed = true`. Until then, friend requests by email keep working and ones by phone show "need the latest schema".
+   - ~~Run the updated `supabase/schema.sql`, then `supabase/rls-test.sql`~~ Done: the schema is on the live project, and the rules checks passed 22/22 (plus 24/24 for sharing) on 2026-10-01. Friend requests by phone work now.
    - Supabase → Authentication → Sign In / Providers → **Phone**: turn it on and connect an SMS provider (Twilio, MessageBird, Vonage or Textlocal; each needs its own account and costs a little per text). Until then, "Text me a code" says phone sign-in isn't switched on yet.
 3. **Two-account test with a friend**: both sign in, add each other, check sharing levels, private events, Free now, a shared plan, and the group calendar. Open your booking link in a private window; Google events should show as unavailable.
 4. **Google's "unverified app" warning**: add friends as test users in Google Cloud (quick), or apply for verification (weeks).
 5. **Booking emails** (optional): buy a domain, create a free Resend account, then add `RESEND_API_KEY` and `BOOKING_EMAIL_FROM` in Vercel.
 6. ~~**Tidy-up**~~ Done 2026-09-26: the Google key file is in Drive's trash (the keys live in Vercel).
 
-### Phase C: ideas for later (not started, need a yes)
+### Phase C: ideas for later
 
-- Reminders before a plan starts.
-- Suggest a time automatically from everyone's free windows and open votes.
-- A shared plan chat or comments.
+- ~~Reminders before a plan starts.~~ Done 2026-09-27 (notifications).
+- ~~Suggest a time automatically from everyone's free windows and open votes.~~ Done 2026-10-02: "Best time" on the plan card.
+- ~~A shared plan chat or comments.~~ Done 2026-10-02: "Talk it over" under the plan.
+
+## 4b. Reviews
+
+### 2026-10-02: development-manager read-only review of PR #26 (friends, phone, organizations, always busy) and PR #30 (best time, comments)
+
+Two read-only reviewers (correctness; security and privacy) found no blockers. Should-fix findings and what was done:
+
+| Finding | Fix | Proven by |
+|---|---|---|
+| Best time could prefer more people free over a voted time | `suggestBestTime` ranks votes, then people free, then sooner | `hangout` test "one vote beats more people free" |
+| Editing a plan could drop comments, votes or RSVPs saved by someone else at the same moment | The kept fields are copied from the copy being saved, inside `mutate` | browser test "comments: … kept when the plan is edited" |
+| A stale guest page could bring deleted comments back, or onto a new plan | Guests send `{ planId, keep, add }`; only genuinely new comments are added, and only to the plan they saw | `guests` test "a stale guest page never brings comments back" |
+| Guests could push everyone else's comments out of the 100-comment cap; long ids were re-added on every save | A full plan takes no more guest comments; ids are cut to 40 characters before comparing | same `guests` test |
+| A member's whole-group save could rewrite, delete or forge other people's comments | The server keeps everyone else's comments as stored and stamps new ones (`mergeMemberComments`) | `api` test "a member's save keeps everyone else's comments" |
+| A non-owner could turn an organization back into a friends group | The server keeps `kind: "organization"` unless the owner changes it; Settings disables the choice for others | `api` test "only the owner can turn an organization back" |
+| A locked group (every 1-on-1) could be read by any signed-in account with the link; a refused save sent the whole group back | Only the owner, signed-in members and pending email invitees can open it; refusals carry nothing about the group | `api` test "a locked group … tells an outsider nothing" |
+
+Accepted as designed (Alexi can change): removing a plan deletes its comments; a member who leaves takes their comments with them.
 
 ## 5. Release checklist (run before calling any change done)
 

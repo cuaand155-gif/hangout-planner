@@ -31,6 +31,7 @@ import {
   timeZoneLabel,
   timeZoneOffsetLabel,
   voteCount,
+  whoIsFree,
   widenCoverage,
 } from "./lib/planner.js";
 import { applyMembership, findMemberForParty, linkMemberToParty, normalizeEmail, planManualClaim, resolveMembership } from "./lib/membership.js";
@@ -75,7 +76,7 @@ import { DEMO_SLUG, checklistSteps, placeholderName, showChecklist } from "./lib
 import { APPEARANCES, THEME_COLORS, normalizeAppearance, resolveTheme } from "./lib/appearance.js";
 import { initBookingOwner } from "./booking-owner.js";
 import { installMode, isIos, isStandalone, registerServiceWorker } from "./lib/pwa.js";
-import { REPEATS, applyRsvp, nextOccurrence, repeatLabel, rsvpAnswers, rsvpSummary, toggleTimeVote } from "./lib/hangout.js";
+import { COMMENT_LIMITS, REPEATS, addComment, applyRsvp, nextOccurrence, removeComment, repeatLabel, rsvpAnswers, rsvpSummary, suggestBestTime, toggleTimeVote } from "./lib/hangout.js";
 import { guestUpdateFrom, isInviteCode, newGuestToken } from "./lib/guests.js";
 import { membersWithoutVote, nextNudgeAt, notificationsFor, unseenCount } from "./lib/notifications.js";
 import { pushSupport, urlBase64ToUint8Array } from "./lib/push.js";
@@ -335,13 +336,19 @@ function renderSignInGate() {
   $("gateSignIn").classList.toggle("outline-button", joining);
   $("gateEyebrow").textContent = gate === "revoked" ? "LINK TURNED OFF" : gate === "locked" ? "MEMBERS ONLY" : "YOU'RE INVITED";
   const name = session.joinName || friendlyGroupName();
+  // Signed in but not a member of a locked group: signing in again won't help.
+  const outsider = gate === "locked" && Boolean(ui.user);
+  $("gateSignIn").hidden = outsider;
+  $("gatePhone").hidden = outsider;
   $("gateTitle").textContent =
-    gate === "join" ? `Join ${name}`
+    outsider ? `${name} is only open to its members`
+    : gate === "join" ? `Join ${name}`
       : gate === "revoked" ? "This invite link doesn't work any more"
         : gate === "locked" ? `${name} is for signed-in members`
           : `Sign in to join ${friendlyGroupName()}`;
   $("gateCopy").textContent =
-    gate === "join" ? "Just add your name to mark when you're free, vote on a time and RSVP. No account needed."
+    outsider ? "You're signed in, but you're not in this group. Ask someone in it to add you."
+    : gate === "join" ? "Just add your name to mark when you're free, vote on a time and RSVP. No account needed."
       : gate === "revoked" ? "Ask whoever sent it for a new link. Already in the group? Sign in."
         : gate === "locked" ? "The group's owner only lets signed-in people in. Sign in with Google to join."
           : "Groups share when people are free, so only signed-in people can open them. It's free and takes one tap with Google.";
@@ -492,7 +499,7 @@ async function guestSave(apply) {
   session.state = next;
   ui.saving = true;
   render();
-  const { response, payload } = await guestPost({ action: "guest-update", ...guestUpdateFrom(next, memberId) });
+  const { response, payload } = await guestPost({ action: "guest-update", ...guestUpdateFrom(next, memberId, new Date(), before) });
   ui.saving = false;
   if (guestLockedOut(response, payload)) return false;
   if (!response?.ok) {
@@ -1233,7 +1240,9 @@ function renderPlan() {
   $("tentativeHeading").textContent = plan.chosen ? "See you there" : "Keep a maybe on the calendar";
   $("tentativeLead").textContent = plan.chosen ? "The time is picked. Let everyone know if you're in." : "Save the idea now and find the best time with your group later.";
 
-  const options = timeOptionsForPlan(plan);
+  const candidates = timeOptionsForPlan(plan, { all: true });
+  renderBestTime(plan, candidates);
+  const options = candidates.slice(0, 5);
   $("tentativeSuggestions").innerHTML = options.length
     ? `<span>${plan.chosen ? "Other times" : "Vote on a time, then pick one"}</span>${options
         .map((option) => {
@@ -1249,10 +1258,123 @@ function renderPlan() {
   renderRsvp(plan, occurrence);
   renderCalendarAdd(plan);
   renderNudge(plan);
+  renderComments(plan);
 }
 
-/** Suggested windows plus any time someone has voted for, most votes first. */
-function timeOptionsForPlan(plan) {
+/**
+ * "Best time": the one candidate to suggest, from the time votes and who is
+ * free. Only a suggestion: someone still taps to pick it, so the group is
+ * never committed to a time by itself.
+ */
+function renderBestTime(plan, candidates) {
+  const box = $("bestTime");
+  const length = settings().minWindowHours * 3600 * 1000;
+  const members = session.state.members.filter((member) => !member.pending);
+  const scored = candidates.map((option) => ({
+    ...option,
+    free: whoIsFree(members, option.start, new Date(Math.min(option.start.getTime() + length, option.end.getTime()))).free.length,
+  }));
+  const best = plan.chosen ? null : suggestBestTime(scored, { memberCount: members.length });
+  box.hidden = !best;
+  if (!best) {
+    box.innerHTML = "";
+    return;
+  }
+  box.innerHTML = `<span class="best-time-icon">${svgIcon("sparkle")}</span>
+    <div><small>BEST TIME</small><strong>${escapeHtml(formatDayStamp(best.start))} at ${escapeHtml(formatClock(best.start))}</strong>${
+      best.reason ? `<span>${escapeHtml(best.reason)}</span>` : ""
+    }</div>${
+      session.guest
+        ? ""
+        : `<button type="button" class="primary-button small" data-pick-best="${best.start.getTime()}" data-pick-end="${best.end.getTime()}">Pick it</button>`
+    }`;
+}
+
+$("bestTime").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-pick-best]");
+  if (button) pickPlanTime(new Date(Number(button.dataset.pickBest)), Number(button.dataset.pickEnd));
+});
+
+/* Talking the plan over */
+
+const COMMENT_PREVIEW = 6;
+
+function renderComments(plan) {
+  const comments = plan.comments || [];
+  const list = $("commentList");
+  const expanded = list.dataset.expanded === "1";
+  const shown = expanded ? comments : comments.slice(-COMMENT_PREVIEW);
+  const hidden = comments.length - shown.length;
+  const byId = new Map(session.state.members.map((member) => [member.id, member]));
+  $("planChatLabel").textContent = comments.length ? `Talk it over · ${comments.length}` : "Talk it over";
+  list.innerHTML =
+    (hidden ? `<button type="button" class="text-button comment-more" data-more-comments>Show ${hidden} earlier</button>` : "") +
+    shown
+      .map((comment) => {
+        const author = byId.get(comment.memberId);
+        const mine = comment.memberId === memberId;
+        const name = mine ? "You" : author?.name || "Someone";
+        return `<div class="comment${mine ? " mine" : ""}">
+          <span class="avatar ${escapeAttribute(author?.palette || "avatar-lilac")}">${escapeHtml(author?.initials || initialsFor(name))}</span>
+          <div><p><strong>${escapeHtml(name)}</strong><small>${escapeHtml(formatRelative(comment.at))}</small></p><p class="comment-text">${escapeHtml(comment.text)}</p></div>
+          ${mine ? `<button type="button" class="comment-delete" data-delete-comment="${escapeAttribute(comment.id)}" aria-label="Delete your comment">${svgIcon("x")}</button>` : ""}
+        </div>`;
+      })
+      .join("");
+  // Not part of the group yet (behind the gate): nothing to say as.
+  $("commentForm").hidden = !me();
+}
+
+$("commentList").addEventListener("click", async (event) => {
+  if (event.target.closest("[data-more-comments]")) {
+    $("commentList").dataset.expanded = "1";
+    renderComments(session.state.plan);
+    return;
+  }
+  const remove = event.target.closest("[data-delete-comment]");
+  if (!remove) return;
+  const id = remove.dataset.deleteComment;
+  await mutate((draft) => {
+    if (draft.plan) draft.plan.comments = removeComment(draft.plan.comments, id, memberId);
+  });
+  showToast("Comment deleted.");
+});
+
+$("commentForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const field = $("commentText");
+  const text = field.value.trim();
+  if (!text || !session.state.plan || !me()) return;
+  const id = createId("c");
+  field.value = "";
+  field.style.height = "";
+  await mutate(
+    (draft) => {
+      if (draft.plan) draft.plan.comments = addComment(draft.plan.comments, { id, memberId, text });
+    },
+    { note: `${displayName()} commented on the plan` }
+  );
+  // Didn't go through (offline guest, a lost race): give the words back.
+  const landed = (session.state.plan?.comments || []).some((comment) => comment.id === id);
+  if (!landed && !field.value) field.value = text;
+});
+
+$("commentText").addEventListener("keydown", (event) => {
+  // Enter sends; Shift+Enter starts a new line.
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    $("commentForm").requestSubmit();
+  }
+});
+
+$("commentText").addEventListener("input", (event) => {
+  const field = event.target;
+  field.style.height = "";
+  field.style.height = `${Math.min(field.scrollHeight, 140)}px`;
+});
+
+/** Suggested windows plus any time someone has voted for, most votes first (five, or `all`). */
+function timeOptionsForPlan(plan, { all = false } = {}) {
   const now = new Date();
   const length = settings().minWindowHours * 3600 * 1000;
   const votes = plan.timeVotes || {};
@@ -1265,7 +1387,7 @@ function timeOptionsForPlan(plan) {
     .filter(([key, option]) => key !== chosen && option.end > now)
     .map(([key, option]) => ({ ...option, voters: votes[key] || [] }))
     .sort((a, b) => b.voters.length - a.voters.length || a.start - b.start)
-    .slice(0, 5);
+    .slice(0, all ? undefined : 5);
 }
 
 function renderRsvp(plan, occurrence) {
@@ -2840,36 +2962,35 @@ $("tentativePlanForm").addEventListener("submit", async (event) => {
     repeat: String(form.get("repeat") || "none"),
     updatedAt: new Date().toISOString(),
   };
-  // Editing the plan keeps the picked time, votes and RSVPs.
   const previous = session.state.plan;
-  if (previous) {
-    for (const key of ["chosen", "chosenEnd", "timeZone", "timeVotes", "rsvp", "createdBy", "createdAt", "chosenBy", "nudgedAt"]) {
-      if (previous[key] !== undefined) plan[key] = previous[key];
-    }
-  } else {
-    plan.createdBy = memberId;
-    plan.createdAt = new Date().toISOString();
-  }
   // Opened from "Plan something": that window becomes the plan's time.
-  if (ui.pendingWindow) {
-    plan.chosen = ui.pendingWindow.start.toISOString();
-    plan.chosenEnd = ui.pendingWindow.end.toISOString();
-    plan.timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    plan.chosenBy = memberId;
-    ui.pendingWindow = null;
-  }
+  const picked = ui.pendingWindow
+    ? { chosen: ui.pendingWindow.start.toISOString(), chosenEnd: ui.pendingWindow.end.toISOString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, chosenBy: memberId }
+    : null;
+  ui.pendingWindow = null;
   if (plan.timing === "range" && plan.start && plan.end && plan.end < plan.start) {
     showToast("The end of the range comes before the start.");
     return;
   }
   const saved = await mutate((draft) => {
-    draft.plan = plan;
+    // Editing keeps the picked time, votes, RSVPs and comments, read from the
+    // copy being saved: if someone else saved first, theirs are kept too.
+    const kept = {};
+    if (draft.plan) {
+      for (const key of ["chosen", "chosenEnd", "timeZone", "timeVotes", "rsvp", "createdBy", "createdAt", "chosenBy", "nudgedAt", "comments"]) {
+        if (draft.plan[key] !== undefined) kept[key] = draft.plan[key];
+      }
+    } else {
+      kept.createdBy = memberId;
+      kept.createdAt = new Date().toISOString();
+    }
+    draft.plan = { ...plan, id: draft.plan?.id || plan.id, ...kept, ...(picked || {}) };
   }, { note: `Tentative plan: ${plan.activity}` });
   dialogs.plan.close();
   showToast("Tentative plan saved — suggested windows are below.");
   // Tell the group (people with notifications on get a push).
   if (saved && !previous) announce("plan-proposed");
-  if (saved && plan.chosen && plan.chosen !== previous?.chosen) announce("time-chosen");
+  if (saved && picked && picked.chosen !== previous?.chosen) announce("time-chosen");
 });
 
 $("rsvpRow").addEventListener("click", async (event) => {
@@ -2907,11 +3028,16 @@ $("tentativeSuggestions").addEventListener("click", async (event) => {
   }
   const button = event.target.closest("[data-window]");
   if (!button) return;
-  const chosen = new Date(Number(button.dataset.window));
-  // A suggestion is the whole free stretch, which can be most of a day. The
-  // event itself runs for the group's own "shortest window" setting, and never
-  // past the end of the free stretch.
-  const windowEnd = button.dataset.windowEnd ? Number(button.dataset.windowEnd) : null;
+  await pickPlanTime(new Date(Number(button.dataset.window)), button.dataset.windowEnd ? Number(button.dataset.windowEnd) : null);
+});
+
+/**
+ * Pencils the plan in at `chosen`. A suggestion is the whole free stretch,
+ * which can be most of a day: the event itself runs for the group's own
+ * "shortest window" setting, and never past the end of the free stretch.
+ */
+async function pickPlanTime(chosen, windowEnd) {
+  if (session.guest) return;
   const planLength = settings().minWindowHours * 3600 * 1000;
   const chosenEnd = new Date(Math.min(chosen.getTime() + planLength, windowEnd || Infinity));
   const picked = await mutate((draft) => {
@@ -2925,7 +3051,7 @@ $("tentativeSuggestions").addEventListener("click", async (event) => {
   }, { note: `Pencilled in for ${formatDayStamp(chosen)} at ${formatClock(chosen)}` });
   showToast(`Pencilled in for ${formatDayStamp(chosen)} at ${formatClock(chosen)}.`);
   if (picked) announce("time-chosen");
-});
+}
 
 /* People */
 
@@ -3583,6 +3709,12 @@ $("settingsButton").addEventListener("click", () => {
   $("settingWorkspaceName").value = session.state.name;
   const pair = groupKind() === "pair";
   $("settingGroupKind").value = pair ? "friends" : groupKind();
+  // Only the owner can turn an organization back into a friends group (the server checks too).
+  const pinned = groupKind() === "organization" && Boolean(session.state.ownerId) && session.state.ownerId !== ui.user?.id;
+  $("settingGroupKind").disabled = pinned;
+  $("groupKindHint").textContent = pinned
+    ? "Only the group's owner can change an organization's type."
+    : "An organization, club, team or workplace never sees event names or places, only when people are free.";
   for (const id of ["settingGroupKind", "groupKindHint"]) $(id).hidden = pair;
   $("settingGroupKind").previousElementSibling.hidden = pair;
   $("settingWeekStart").value = String(config.weekStartsOn);

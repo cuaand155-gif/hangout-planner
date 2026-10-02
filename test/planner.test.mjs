@@ -330,3 +330,16 @@ test("freeTogether finds the hours nobody is busy, soonest first", async () => {
   const later = freeTogether(week, busy, { dayStart: 8, dayEnd: 22, minHours: 3, now: new Date(2026, 9, 5, 16, 30) });
   assert.deepEqual(later.map((w) => [w.start.getHours(), w.end.getHours()]), [[17, 22]], "hours already started are skipped");
 });
+
+test("whoIsFree splits members into free, busy and unknown for a span", async () => {
+  const { whoIsFree, normalizeWorkspaceState } = await import("../lib/planner.js");
+  const { members } = normalizeWorkspaceState({
+    members: [
+      { id: "free", name: "F", weekly: [{ weekday: 1, start: "08:00", end: "09:00" }] },
+      { id: "busy", name: "B", weekly: [{ weekday: 1, start: "18:00", end: "19:00" }] },
+      { id: "unknown", name: "U" },
+    ],
+  });
+  const result = whoIsFree(members, new Date(2026, 9, 5, 17), new Date(2026, 9, 5, 19));
+  assert.deepEqual([result.free, result.busy, result.unknown].map((list) => list.map((m) => m.id)), [["free"], ["busy"], ["unknown"]]);
+});
