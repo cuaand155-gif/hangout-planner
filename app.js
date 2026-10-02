@@ -250,6 +250,9 @@ const noteDemoMode = () => {
 
 const toastElement = $("toast");
 const showToast = (message) => {
+  // An open dialog sits in the browser's top layer, above anything on the page, so the toast goes inside it.
+  const host = document.querySelector("dialog[open]") || document.body;
+  if (toastElement.parentElement !== host) host.append(toastElement);
   toastElement.textContent = message;
   toastElement.classList.add("show");
   window.clearTimeout(showToast.timer);
@@ -766,6 +769,9 @@ function renderChrome() {
   }
   $("todayStamp").textContent = formatDayStamp(new Date()).toUpperCase();
   $("syncState").textContent = ui.saving ? "SAVING" : session.persisted ? "LIVE" : session.offline ? "OFFLINE" : "DEMO";
+  const liveDot = document.querySelector(".live-dot");
+  liveDot?.classList.toggle("is-offline", !session.persisted && session.offline);
+  liveDot?.classList.toggle("is-demo", !session.persisted && !session.offline);
   const kind = groupKind();
   $("privacyStatus").textContent = kind === "organization" ? "Free / busy only, always" : session.state.privacy === "details" ? "Event details shared" : "Busy / free only";
   $("groupKindLabel").textContent = kind === "organization" ? "Organization" : kind === "pair" ? "1-on-1" : "Group";
@@ -1218,6 +1224,9 @@ function renderPlan() {
     ? `${repeats ? "Next up" : "Pencilled in for"} ${formatDayStamp(occurrence.start)} at ${formatClock(occurrence.start)} with ${plan.audience}${repeats}`
     : `${scope} with ${plan.audience}${repeats}`;
   $("tentativeBadge").textContent = plan.chosen ? (repeats ? "Repeating" : "Pencilled in") : "Not confirmed";
+  $("tentativeEyebrow").textContent = plan.chosen ? "IT'S A PLAN" : "JUST A THOUGHT";
+  $("tentativeHeading").textContent = plan.chosen ? "See you there" : "Keep a maybe on the calendar";
+  $("tentativeLead").textContent = plan.chosen ? "The time is picked. Let everyone know if you're in." : "Save the idea now and find the best time with your group later.";
 
   const options = timeOptionsForPlan(plan);
   $("tentativeSuggestions").innerHTML = options.length
@@ -1464,7 +1473,9 @@ function checklistStepMarkup(step, index) {
 
 function renderChecklist() {
   const card = $("checklistCard");
-  const steps = checklistSteps({ state: session.state, member: me(), sourcesCount: calendarSources.length, slug: session.slug });
+  // A 1-on-1 is locked to its two people, so there is no one left to invite.
+  const steps = checklistSteps({ state: session.state, member: me(), sourcesCount: calendarSources.length, slug: session.slug })
+    .filter((step) => step.id !== "invite" || groupKind() !== "pair");
   // Setting the group up is the organiser's job, not a guest's.
   const visible = ui.workspaceLoaded && !session.guest && !checklistDismissed && showChecklist(session.slug, steps);
   card.hidden = !visible;
@@ -1907,7 +1918,7 @@ function renderGroups() {
           return `<a class="group-row${current ? " current" : ""}" href="${escapeAttribute(groupUrl(group.slug))}">
             <span class="group-mark">${escapeHtml(initialsFor(name || group.slug))}</span>
             <div><strong>${escapeHtml(name || group.slug)}</strong><small>${escapeHtml(group.onAccount ? "On your account" : "On this device")} · ${escapeHtml(formatRelative(group.at))}</small></div>
-            <span class="group-actions">${current ? '<span class="group-current">OPEN</span>' : ""}${
+            <span class="group-actions">${current ? '<span class="group-current">CURRENT</span>' : ""}${
               !current && !group.onAccount ? `<button type="button" data-forget-group="${escapeAttribute(group.slug)}" aria-label="Remove ${escapeAttribute(name || group.slug)} from this list">${svgIcon("x")}</button>` : ""
             }</span>
           </a>`;
@@ -2750,7 +2761,7 @@ function renderAccount(user) {
   const viaPhone = Boolean(user && !user.email && user.phone);
   const name = user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email || (user?.phone ? formatPhone(user.phone) : "Google account");
   $("accountStatus").textContent = signedIn ? "Signed in" : "Not signed in";
-  $("accountStatusDetail").textContent = signedIn ? `${name} connected` : "Your local planner session is active.";
+  $("accountStatusDetail").textContent = signedIn ? `${name} connected` : session.needsSignIn ? "Sign in to open this group." : "Your local planner session is active.";
   $("accountStatusDot").style.background = signedIn ? "#64cf8b" : "#aaa7b5";
   $("googleSignInButton").hidden = signedIn;
   $("phoneSignInForm").hidden = signedIn;
@@ -3018,7 +3029,7 @@ function friendRowMarkup(row, actions, { withStatus = false } = {}) {
   const photo = safeImageUrl(party.photo);
   const status = withStatus ? statusLine(party.id) : null;
   return `<div class="friend-row">
-    <div class="avatar avatar-lilac${status?.kind === "free-now" ? " is-free" : ""}"${photo ? ` style="background-image:url(&quot;${escapeAttribute(photo)}&quot;);background-size:cover;background-position:center"` : ""}>${photo ? "" : escapeHtml(initialsFor(party.name))}</div>
+    <div class="avatar avatar-lilac${status?.kind === "free-now" ? " is-free" : ""}"${photo ? ` style="background-image:url(&quot;${escapeAttribute(photo)}&quot;);background-size:cover;background-position:center"` : ""}>${photo ? "" : escapeHtml(/\p{L}/u.test(party.name || "") ? initialsFor(party.name) : "#")}</div>
     <div><strong>${escapeHtml(party.name)}</strong><small>${escapeHtml(party.pendingSignup ? "Waiting for them to sign in" : party.email || party.phone || "")}</small>${
       status ? `<small class="friend-status ${status.kind}">${escapeHtml(status.text)}</small>` : ""
     }</div>
@@ -3043,14 +3054,14 @@ function renderFriends(errorMessage) {
     .map((row) =>
       friendRowMarkup(
         row,
-        `<button type="button" class="accept" data-accept="${escapeAttribute(row.id)}">Accept</button><button type="button" class="quiet" data-decline="${escapeAttribute(row.id)}">Decline</button>`
+        `<button type="button" class="accept" data-accept="${escapeAttribute(row.id)}">Accept</button><button type="button" class="quiet danger" data-decline="${escapeAttribute(row.id)}">Decline</button>`
       )
     )
     .join("");
 
   $("outgoingSection").hidden = !outgoing.length;
   $("outgoingList").innerHTML = outgoing
-    .map((row) => friendRowMarkup(row, `<button type="button" class="quiet" data-withdraw="${escapeAttribute(row.id)}">Withdraw</button>`))
+    .map((row) => friendRowMarkup(row, `<button type="button" class="quiet danger" data-withdraw="${escapeAttribute(row.id)}">Withdraw</button>`))
     .join("");
 
   $("friendList").innerHTML = accepted.length
@@ -3286,6 +3297,7 @@ $("groupForm").addEventListener("submit", async (event) => {
 async function removeMember(id) {
   const member = session.state.members.find((entry) => entry.id === id);
   if (!member || id === memberId) return;
+  if (!window.confirm(`Remove ${member.name} from this group?`)) return;
   if (member.guest) {
     // The server removes a guest, their pass and their votes together.
     const { ok, payload } = await workspaceAction({ action: "guest-remove", memberId: id });
@@ -3641,6 +3653,14 @@ $("resetLocal").addEventListener("click", () => {
 
 /* Activity */
 
+// A notice is about the plan, so picking one goes to it.
+$("noticeList").addEventListener("click", (event) => {
+  if (!event.target.closest("[data-notice]")) return;
+  $("activityDialog").close();
+  const section = $("tentativePlanSection");
+  if (!section.hidden) section.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
 $("activityButton").addEventListener("click", () => {
   const notices = myNotices();
   const seenNotices = new Set(readJson(STORAGE.noticesSeen(session.slug), []));
@@ -3695,7 +3715,7 @@ function renderNudge(plan) {
   const next = nextNudgeAt(plan);
   button.disabled = Boolean(next) || !waiting;
   button.textContent = next
-    ? `Nudged · again ${formatDayStamp(next)}, ${formatClock(next)}`
+    ? `Nudged · you can nudge again ${new Date(next).toDateString() === new Date().toDateString() ? "at" : `${formatDayStamp(next)},`} ${formatClock(next)}`
     : waiting
       ? `Nudge people who haven't voted (${waiting})`
       : "Everyone has voted";
@@ -3800,7 +3820,7 @@ function renderPushCard() {
   } else if ("Notification" in window && Notification.permission === "denied") {
     say("Notifications are blocked", "Your browser blocks notifications from Waddle. Allow them in its site settings, then come back here.", null);
   } else {
-    say("Turn on notifications", "Get a nudge on this device when a plan is proposed, when a time is chosen, and an hour before it starts.", { key: "on", label: "Turn on notifications" });
+    say("Turn on notifications", "Get a nudge on this device when a plan is proposed, when a time is chosen, and an hour before it starts.", { key: "on", label: "Turn on" });
   }
 }
 
@@ -4668,6 +4688,11 @@ function setMenuOpen(open) {
 
 $("mobileMenu").addEventListener("click", () => setMenuOpen(!$("sidebar").classList.contains("open")));
 $("menuBackdrop").addEventListener("click", () => setMenuOpen(false));
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape" || !$("sidebar").classList.contains("open")) return;
+  setMenuOpen(false);
+  $("mobileMenu").focus();
+});
 
 for (const item of document.querySelectorAll(".nav-item")) {
   item.addEventListener("click", () => {
