@@ -112,6 +112,7 @@ const STORAGE = {
   member: "gatherly-member-id",
   profile: "gatherly-profile",
   sources: "gatherly-calendar-sources",
+  googleHealth: "gatherly-google-health",
   seen: (slug) => `gatherly-activity-seen:${slug}`,
   googleToken: "gatherly-google-token",
   groups: "gatherly-groups",
@@ -787,6 +788,7 @@ function renderChrome() {
   const kind = groupKind();
   $("privacyStatus").textContent = kind === "organization" ? "Free / busy only, always" : session.state.privacy === "details" ? "Event details shared" : "Busy / free only";
   $("groupKindLabel").textContent = kind === "organization" ? "Organization" : kind === "pair" ? "1-on-1" : "Group";
+  $("inviteButton").lastChild.textContent = kind === "organization" ? " Invite people" : " Invite a friend";
   const detailsRadio = document.querySelector('input[name="privacy"][value="details"]');
   if (detailsRadio) {
     detailsRadio.disabled = kind === "organization";
@@ -868,11 +870,14 @@ function renderGrid() {
     );
   }
 
+  let anyTimes = false;
   for (const slot of slots) {
     cells.push(`<div class="time-label">${slot.showLabel ? formatHour(slot.hour) : ""}</div>`);
     for (const day of days) {
       const cell = isMineView ? classifySlot(mine ? [mine] : [], day.date, slot.hour) : classifySlot(session.state.members, day.date, slot.hour);
-      const className = isMineView ? mineSlotClass(cell, mine) : cell.state;
+      // Nobody has said anything about this hour yet: that isn't "busy".
+      if (cell.shared > 0) anyTimes = true;
+      const className = isMineView ? mineSlotClass(cell, mine) : cell.shared === 0 ? "no-times" : cell.state;
       const selected = ui.selectedSlot && ui.selectedSlot.iso === day.iso && ui.selectedSlot.hour === slot.hour;
       const inWindow = highlight && cell.start >= highlight.start && cell.start < highlight.end;
       const windowEdge = inWindow
@@ -888,6 +893,7 @@ function renderGrid() {
 
   grid.innerHTML = cells.join("");
   grid.classList.toggle("editing", isMineView);
+  $("gridEmpty").hidden = isMineView || anyTimes;
   $("groupLegend").hidden = isMineView;
   $("mineLegend").hidden = !isMineView;
   $("editHint").hidden = !isMineView;
@@ -910,6 +916,8 @@ function showDay(index) {
   ui.dayIndex = Math.min(Math.max(index, 0), week.length - 1);
   renderGrid();
 }
+
+$("gridEmptyAdd").addEventListener("click", () => $("editOwnAvailability").click());
 
 $("dayStrip").addEventListener("click", (event) => {
   const pill = event.target.closest("[data-day-index]");
@@ -1171,13 +1179,13 @@ function renderPeople() {
     return `<article class="person-card${isYou ? " is-you" : ""}${member.pending ? " pending" : ""}">
       ${isYou ? "" : `<button class="card-remove member-only" data-remove-member="${escapeAttribute(member.id)}" aria-label="Remove ${escapeAttribute(member.name)}">${svgIcon("x")}</button>`}
       <div class="person-top"><div class="avatar ${member.palette}">${escapeHtml(member.initials)}</div><span class="presence${sharedThisWeek ? "" : " away"}"></span></div>
-      <strong>${escapeHtml(member.name)}${isYou ? ' <span class="person-badge">YOU</span>' : member.guest ? ' <span class="person-badge guest">GUEST</span>' : ""}</strong>
+      <strong>${escapeHtml(member.name)}${isYou && !/^you$/i.test(member.name.trim()) ? ' <span class="person-badge">YOU</span>' : !isYou && member.guest ? ' <span class="person-badge guest">GUEST</span>' : ""}</strong>
       <small>Updated ${escapeHtml(formatRelative(member.updatedAt))}</small>
       <span class="${statusClass}">${escapeHtml(status)}</span>
     </article>`;
   });
 
-  cards.push(`<article class="person-card add-person" id="addPerson" role="button" tabindex="0"><div class="add-icon">${svgIcon("plus")}</div><strong>Add someone</strong><small>Invite a friend to join</small></article>`);
+  cards.push(`<article class="person-card add-person" id="addPerson" role="button" tabindex="0"><div class="add-icon">${svgIcon("plus")}</div><strong>Add someone</strong><small>${groupKind() === "organization" ? "Invite someone to join" : "Invite a friend to join"}</small></article>`);
   grid.innerHTML = cards.join("");
 }
 
@@ -1556,7 +1564,8 @@ const CHECKLIST_STEPS = {
     doneAction: "Invite more",
     hint: () => {
       const count = session.state.members.length;
-      const wanted = count === 2 ? "one more friend" : count === 1 ? "two friends" : "a few friends";
+      const who = groupKind() === "organization" ? ["one more person", "two people", "a few people"] : ["one more friend", "two friends", "a few friends"];
+      const wanted = count === 2 ? who[0] : count === 1 ? who[1] : who[2];
       return `${count} ${count === 1 ? "person" : "people"} so far. Share the link with ${wanted}.`;
     },
     doneHint: () => `${session.state.members.length} people are in.`,
@@ -1865,6 +1874,14 @@ async function importIcs(url, { silent = false, quiet = false } = {}) {
   return count;
 }
 
+/** Remembers how the last Google sync went, so Calendar links can say so instead of failing quietly. */
+function noteGoogleSync(ok, problem = "") {
+  const health = readJson(STORAGE.googleHealth, {});
+  const now = new Date().toISOString();
+  writeJson(STORAGE.googleHealth, ok ? { okAt: now } : { ...health, failedAt: now, problem });
+  renderGoogleState();
+}
+
 async function syncGoogle({ silent = false, quiet = false } = {}) {
   const token = googleToken();
   if (!token && !googleServer.connected) {
@@ -1891,11 +1908,13 @@ async function syncGoogle({ silent = false, quiet = false } = {}) {
       // Waddle sign-in or a Google hiccup keeps the stored connection.
       const answer = await response.json().catch(() => ({}));
       if (!answer.reconnect) {
-        if (!silent) showToast(response.status === 401 ? "Sign in to Waddle again to keep Google syncing." : answer.error || "Could not reach Google Calendar.");
+        const problem = response.status === 401 ? "Sign in to Waddle again to keep Google syncing." : answer.error || "Could not reach Google Calendar.";
+        noteGoogleSync(false, problem);
+        if (!silent) showToast(problem);
         return null;
       }
       googleServer.connected = false;
-      renderGoogleState();
+      noteGoogleSync(false, answer.error || "Google stopped sharing your calendar. Tap Connect again.");
       if (!silent) showToast(answer.error || "Google stopped sharing your calendar. Tap Connect again.");
       return null;
     }
@@ -1917,6 +1936,7 @@ async function syncGoogle({ silent = false, quiet = false } = {}) {
     if (!response.ok) throw new Error(String(response.status));
     payload = await response.json();
   } catch {
+    noteGoogleSync(false, "Could not reach Google Calendar.");
     if (!silent) showToast("Could not reach Google Calendar.");
     return null;
   }
@@ -1934,6 +1954,7 @@ async function syncGoogle({ silent = false, quiet = false } = {}) {
 
   const { count, changed } = await storeImportedBlocks(blocks, "google", range, { quiet });
   syncGoogle.lastChanged = changed;
+  noteGoogleSync(true);
   const source = calendarSources.find((entry) => entry.type === "google");
   if (source) {
     source.syncedAt = new Date().toISOString();
@@ -1953,11 +1974,20 @@ function renderGoogleState() {
   const button = $("googleCalendarButton");
   button.textContent = connected ? "Synced" : "Connect";
   button.classList.toggle("connected", connected);
-  $("googleCalendarState").textContent = connected
-    ? googleServer.connected
-      ? "Connected. Keeps syncing on its own while you use Waddle, on any device you sign in on."
-      : "Connected. Google only allows about an hour at a time, then you'll be asked to connect again. For syncing that never stops, add your calendar's secret iCal address below."
-    : "Sync busy times and show schedule overlaps.";
+  const health = readJson(STORAGE.googleHealth, {});
+  const failedLast = health.failedAt && (!health.okAt || health.failedAt > health.okAt);
+  const lastSync = health.okAt ? ` Last synced ${formatRelative(health.okAt)}.` : "";
+  const state = $("googleCalendarState");
+  state.textContent = connected
+    ? failedLast
+      ? `Last sync didn't work (${formatRelative(health.failedAt)}): ${health.problem}${lastSync}`
+      : googleServer.connected
+        ? `Connected. Keeps syncing on its own while you use Waddle, on any device you sign in on.${lastSync}`
+        : `Connected. Google only allows about an hour at a time, then you'll be asked to connect again. For syncing that never stops, add your calendar's secret iCal address below.${lastSync}`
+    : failedLast
+      ? `Disconnected ${formatRelative(health.failedAt)}: ${health.problem}`
+      : "Sync busy times and show schedule overlaps.";
+  state.classList.toggle("is-problem", Boolean(failedLast));
 }
 
 /* Automatic calendar refresh */
@@ -2622,6 +2652,7 @@ $("calendarSources").addEventListener("click", (event) => {
       clearGoogleToken();
       if (googleServer.connected) googleApi("DELETE").catch(() => {});
       googleServer.connected = false;
+      window.localStorage.removeItem(STORAGE.googleHealth);
       renderGoogleState();
     }
     saveMyEvents();
@@ -3781,7 +3812,7 @@ $("exportWorkspace").addEventListener("click", () => {
 
 $("resetLocal").addEventListener("click", () => {
   // The calendar links go, and so do the events imported from them (names included).
-  for (const key of [STORAGE.cache(session.slug), STORAGE.member, STORAGE.profile, STORAGE.sources, STORAGE.myEvents, STORAGE.seen(session.slug), STORAGE.guest(session.slug)]) {
+  for (const key of [STORAGE.cache(session.slug), STORAGE.member, STORAGE.profile, STORAGE.sources, STORAGE.googleHealth, STORAGE.myEvents, STORAGE.seen(session.slug), STORAGE.guest(session.slug)]) {
     window.localStorage.removeItem(key);
   }
   clearGoogleToken();
@@ -4329,7 +4360,7 @@ function renderGroupCalendar() {
   const rows = session.state.members
     .map((member) => {
       const isYou = member.id === memberId;
-      const person = `<div class="gc-person${isYou ? " is-you" : ""}" role="rowheader"><div class="avatar ${member.palette}">${escapeHtml(member.initials)}</div><span class="gc-name">${escapeHtml(member.name)}${isYou ? " <em>(you)</em>" : ""}</span></div>`;
+      const person = `<div class="gc-person${isYou ? " is-you" : ""}" role="rowheader"><div class="avatar ${member.palette}">${escapeHtml(member.initials)}</div><span class="gc-name">${escapeHtml(member.name)}${isYou && !/^you$/i.test(member.name.trim()) ? " <em>(you)</em>" : ""}</span></div>`;
       const cells = week
         .map((day) => {
           const today = day.isToday ? " today" : "";

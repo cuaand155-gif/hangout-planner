@@ -366,6 +366,21 @@ describe("calendars", () => {
     assert.equal(google.deleted, 1);
   });
 
+  browserTest("Calendar links say when Google last synced, and why a sync didn't work", { signedIn: true, googleServer: true, allowErrors: /status of 502/ }, async ({ page, go }) => {
+    await go("/");
+    await page.waitForFunction(() => /Synced/.test(document.querySelector("#googleCalendarButton")?.textContent || ""));
+    await page.locator("#calendarButton").click();
+    assert.match(await page.locator("#googleCalendarState").innerText(), /Last synced just now/);
+    // Google is briefly unreachable: the connection stays, and the reason shows.
+    await page.route("**/api/google?**", (route) => route.fulfill({ status: 502, contentType: "application/json", body: JSON.stringify({ error: "Google Calendar didn't answer. Try again in a minute." }) }));
+    await page.locator("#googleCalendarButton").click();
+    await page.waitForFunction(() => document.querySelector("#googleCalendarState")?.classList.contains("is-problem"));
+    const state = await page.locator("#googleCalendarState").innerText();
+    assert.match(state, /Last sync didn't work \(just now\): Google Calendar didn't answer/);
+    assert.match(state, /Last synced just now/);
+    assert.match(await page.locator("#googleCalendarButton").innerText(), /Synced/, "still connected");
+  });
+
   browserTest("Who sees what: a private event disappears from a friend's preview", { signedIn: true }, async ({ page, go }) => {
     await go("/");
     await page.locator("#myAgenda [data-private-title=\"Therapy\"]").waitFor();

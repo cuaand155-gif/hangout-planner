@@ -196,7 +196,7 @@ button.agenda-event:hover{border-color:color-mix(in srgb,var(--purple) 40%,var(-
 .pick-state{display:inline-block;margin-top:5px;font-size:9px;font-weight:700;letter-spacing:.4px;color:var(--muted)}
 .agenda-event.is-picked{border-color:var(--purple)}
 .agenda-event.is-picked .pick-state{color:var(--purple)}
-.agenda-event.is-picked .pick-state:before{content:"👁 "}
+.agenda-event.is-picked .pick-state:before{content:"✓ "}
 .agenda-empty{font-size:11px;color:var(--faint,#b6ada6);padding:4px 2px}
 .agenda-blank{border:1px dashed var(--dash,#e4dfdb);border-radius:11px;padding:26px;text-align:center;color:var(--muted)}
 .agenda-blank strong{display:block;color:var(--ink);font-size:14px}
@@ -684,3 +684,6 @@ section.free-now::-webkit-scrollbar{display:none}
 @media(max-width:620px){.tentative-card{flex-wrap:wrap;position:relative}.tentative-details{flex:1 1 calc(100% - 47px);min-width:0}.tentative-badge{position:absolute;top:14px;right:14px}.tentative-details h3{padding-right:86px}}
 #nudgeVoters:disabled{color:var(--muted);cursor:default}
 .toast[popover]{inset:auto auto 25px 50%;margin:0;border:0;overflow:visible;width:max-content;max-width:calc(100% - 32px)}
+#googleCalendarState.is-problem{color:var(--danger)}
+.slot.no-times{background:repeating-linear-gradient(135deg,transparent 0 6px,color-mix(in srgb,var(--ink) 4%,transparent) 6px 7px)}.legend-dot.no-times{border:1px dashed var(--rule);background:transparent}.grid-empty{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 17px 12px;padding:12px 14px;border:1px dashed var(--rule);border-radius:10px;color:var(--muted);font-size:12px}.grid-empty p{margin:0}
+.booking-days{padding-right:28px;-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 40px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 40px),transparent)}

@@ -202,6 +202,7 @@
                 <span><i class="legend-dot overlap"></i>Everyone’s free</span>
                 <span><i class="legend-dot partial"></i>Some are free</span>
                 <span><i class="legend-dot busy"></i>Busy</span>
+                <span><i class="legend-dot no-times"></i>No times yet</span>
               </div>
               <div class="legend" id="mineLegend" hidden>
                 <span><i class="legend-dot overlap"></i>You’re free</span>
@@ -216,6 +217,7 @@
             <p class="edit-hint" id="editHint" hidden>Mark the hours you’re busy by clicking or dragging. Anything you leave light is shared with your group as free.</p>
             <div class="best-times" id="bestTimes" hidden></div>
             <div class="day-strip" id="dayStrip" aria-label="Pick a day"></div>
+            <div class="grid-empty" id="gridEmpty" hidden><p>No one has added their times for this week yet.</p><button class="primary-button small" type="button" id="gridEmptyAdd">Add your times</button></div>
             <div id="calendarGrid" class="calendar-grid" role="grid" aria-label="Group availability"></div>
             <p class="slot-detail" id="slotDetail" aria-live="polite"></p>
             <div class="selected-window" id="selectedWindow" hidden>
@@ -262,7 +264,7 @@
                 <label class="preview-label" for="mycalPreview">Preview as
                   <select class="text-input" id="mycalPreview"></select>
                 </label>
-                <button class="outline-button" id="sharingButton">👁 Who sees what</button>
+                <button class="outline-button" id="sharingButton"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg> Who sees what</button>
               </div>
               <p class="mycal-summary" id="mycalSummary"></p>
               <div class="agenda" id="myAgenda"></div>
@@ -535,7 +537,7 @@
     </dialog>
 
     <dialog id="sharingDialog">
-      <div class="dialog-header"><div><p class="eyebrow">WHO SEES WHAT</p><h2>Your calendar, your call.</h2></div><button class="close-dialog" aria-label="Close">×</button></div>
+      <div class="dialog-header"><div><p class="eyebrow">WHO SEES WHAT</p><h2>Your calendar, your call.</h2></div><button class="close-dialog" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div>
       <p class="dialog-copy">Your full calendar stays on this device. Friends and groups only ever get what you choose here.</p>
       <label class="field-label" for="shareFriendsDefault">Friends see</label>
       <select class="text-input" id="shareFriendsDefault"></select>
@@ -557,7 +559,7 @@
     </dialog>
 
     <dialog id="friendCalendarDialog" class="wide-dialog">
-      <div class="dialog-header"><div><p class="eyebrow">FRIEND</p><h2 id="friendCalendarTitle">Calendar</h2></div><div class="dialog-header-actions"><button class="primary-button small" type="button" id="friendPlanButton"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg> Plan 1-on-1</button><button class="close-dialog" aria-label="Close">×</button></div></div>
+      <div class="dialog-header"><div><p class="eyebrow">FRIEND</p><h2 id="friendCalendarTitle">Calendar</h2></div><div class="dialog-header-actions"><button class="primary-button small" type="button" id="friendPlanButton"><svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg> Plan 1-on-1</button><button class="close-dialog" aria-label="Close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button></div></div>
       <div class="week-switcher friend-week">
         <button id="friendPrevWeek" aria-label="Previous week">‹</button>
         <strong id="friendWeekLabel">This week</strong>
