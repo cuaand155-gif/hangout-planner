@@ -893,7 +893,9 @@ function renderGrid() {
 
   grid.innerHTML = cells.join("");
   grid.classList.toggle("editing", isMineView);
-  $("gridEmpty").hidden = isMineView || anyTimes;
+  // On a phone only one day is drawn, so check the whole week before saying nobody has times.
+  const weekHasTimes = anyTimes || (!isMineView && week.some((day) => slots.some((slot) => classifySlot(session.state.members, day.date, slot.hour).shared > 0)));
+  $("gridEmpty").hidden = isMineView || weekHasTimes;
   $("groupLegend").hidden = isMineView;
   $("mineLegend").hidden = !isMineView;
   $("editHint").hidden = !isMineView;
@@ -1124,6 +1126,7 @@ function slotLabel(day, slot, cell, isMineView) {
     if (cell.unknown.length) return `${when}, free, not shared yet`;
     return `${when}, you are ${cell.free.length ? "free" : "busy"}`;
   }
+  if (cell.shared === 0) return `${when}, no times yet`;
   if (cell.state === "overlap") return `${when}, everyone free`;
   if (cell.state === "partial") return `${when}, ${cell.free.length} free, ${cell.busy.length} busy`;
   return `${when}, no shared free time`;
@@ -2909,6 +2912,7 @@ $("signOutButton").addEventListener("click", async () => {
   if (!supabaseClient) return;
   await supabaseClient.auth.signOut();
   clearGoogleToken();
+  window.localStorage.removeItem(STORAGE.googleHealth);
   renderGoogleState();
   showToast("Signed out on this device.");
 });
